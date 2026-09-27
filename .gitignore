@@ -1,0 +1,4 @@
+# Publish only the web app; everything else in this folder (chat logs, receipt photos, backups) stays private
+*
+!.gitignore
+!index.html

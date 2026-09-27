@@ -3206,8 +3206,11 @@ function StopIcon() {
 }
 
 function SecretaryView() {
-  const { s, mut, notify, ask } = useApp();
+  const { s, mut, notify, ask, rs } = useApp();
   const meetings = s.meetings || [];
+  // Edge เก็บข้อมูลแยกจากเบราว์เซอร์นี้ ต้องแนบลิงก์ชีตไปด้วยถึงจะเห็นข้อมูลชุดเดียวกัน
+  const edgeLink = /Windows/.test(navigator.userAgent) && location.protocol === 'https:'
+    ? 'microsoft-edge:' + location.origin + location.pathname + (rs.remote ? '?sheet=' + encodeURIComponent(rs.remote.url) : '') + '#secretary' : '';
   const [draft, setDraft] = useState(null);
   const [interim, setInterim] = useState('');
   const [audio, setAudio] = useState(null);
@@ -3314,7 +3317,8 @@ function SecretaryView() {
         <canvas ref={rec.canvasRef} className="recwave" width="720" height="80" hidden={!rec.on} aria-hidden="true" />
         <p className="hint">{rec.on ? 'กำลังบันทึก… แตะปุ่มอีกครั้งเพื่อหยุดและสรุปอัตโนมัติ'
           : draft && draft.transcript ? 'แตะเพื่อบันทึกเสียงต่อจากเดิม' : 'แตะเพื่อเริ่มบันทึกเสียงประชุมหน้างาน ประชุมทีม หรือคุยกับลูกค้า'}</p>
-        {!SpeechRec && <p className="hint warn">เบราว์เซอร์นี้ถอดเสียงเป็นข้อความไม่ได้ ยังอัดเสียงได้ตามปกติ ใช้ Chrome (Android/คอมพิวเตอร์) หรือ Safari (iPhone) เพื่อถอดความอัตโนมัติ</p>}
+        {!SpeechRec && <p className="hint warn">เบราว์เซอร์นี้ (เช่น Firefox) ถอดเสียงเป็นข้อความไม่ได้ ยังอัดเสียงได้ตามปกติ · ถอดความอัตโนมัติได้ใน Microsoft Edge หรือ Chrome (คอมพิวเตอร์/Android) และ Safari (iPhone)</p>}
+        {!SpeechRec && edgeLink && <a className="btn" href={edgeLink} style={{ textDecoration: 'none' }}>เปิดหน้านี้ใน Microsoft Edge</a>}
         {rec.on && <div className="live" ref={liveRef} aria-live="polite">{liveLines || (!interim && <span className="muted">รอฟังเสียงพูด…</span>)}{interim && <i>{liveLines ? '\n' : ''}{interim}</i>}</div>}
         {audio && !rec.on && (
           <div className="row" style={{ justifyContent: 'center' }}>

@@ -267,6 +267,28 @@ input[type=checkbox]{width:18px;height:18px;accent-color:var(--gold-strong);padd
 .photo-row .field{flex:1 1 220px}
 .preview{height:96px;width:auto;border-radius:8px;border:1px solid var(--line)}
 .aibox{display:flex;flex-direction:column;gap:4px;align-items:flex-start}
+/* เคลียร์สำรองจ่าย: ถ่ายรูป → AI สรุป → ยืนยันครั้งเดียว */
+.shoot{display:flex;align-items:center;gap:14px;padding:16px 18px;border:2px dashed var(--gold);border-radius:12px;background:var(--gold-soft);color:var(--gold-ink);cursor:pointer}
+.shoot>span:first-child{font-size:1.9rem;line-height:1}
+.shoot b{display:block;font-size:1.05rem}
+.shoot small{display:block;color:var(--ink-2);font-size:.82rem}
+.shoot.small{padding:10px 14px}.shoot.small>span:first-child{font-size:1.4rem}
+.shoot:focus-within{outline:2px solid var(--gold-strong);outline-offset:2px}
+.shots{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:8px;margin-top:10px}
+.shot{position:relative;aspect-ratio:1;border-radius:8px;overflow:hidden;border:1px solid var(--line);background:var(--surface-2)}
+.shot img{width:100%;height:100%;object-fit:cover}
+.shot .iconbtn{position:absolute;top:4px;right:4px;width:28px;height:28px;min-height:0;border-radius:50%;padding:0}
+.aibusy{margin-top:10px;padding:10px 12px;border-radius:8px;background:var(--surface-2)}
+.aisum{margin-top:14px;border:1px solid var(--gold);background:var(--surface-2);border-radius:12px;padding:14px 16px}
+.aisum dl{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;margin:10px 0;font-size:.92rem}
+.aisum dt{color:var(--ink-2)}.aisum dd{margin:0;overflow-wrap:anywhere}
+.chks{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:4px}
+.chk{display:flex;gap:6px;font-size:.86rem;line-height:1.45}
+.chk.ok{color:var(--ok)}.chk.info{color:var(--ink-2)}.chk.warn{color:var(--warn)}.chk.bad{color:var(--bad)}
+.bigbtn{min-height:48px;font-size:1rem;flex:1 1 260px;justify-content:center}
+.recon td .pill{margin:1px 2px}
+.bars{display:flex;height:8px;border-radius:4px;overflow:hidden;background:var(--line);min-width:80px}
+.bars i{display:block;height:100%;background:var(--gold)}
 /* journal */
 /* LINE import */
 .claims{display:flex;flex-direction:column;gap:10px}
@@ -1158,6 +1180,103 @@ function readPhoto(file, max = 1024) {
   });
 }
 
+/* ---------- เตรียมรูปใบเสร็จ ----------
+   เก็บรูปต้นฉบับขนาดเล็กไว้เป็นหลักฐาน (ไม่ปรับแต่ง) และทำอีกชุดสำหรับส่ง AI:
+   ตัดพื้นหลังรอบกระดาษออก ยืดความต่างสีให้ตัวหนังสือชัด (ช่วยรูปที่แสงจ้า / มืด / สะท้อน) */
+const loadImage = src => new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = src; });
+const fileToDataUrl = file => new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.onerror = rej; fr.readAsDataURL(file); });
+function drawScaled(img, max, box) {
+  const b = box || { x: 0, y: 0, w: img.width, h: img.height };
+  const k = Math.min(1, max / Math.max(b.w, b.h));
+  const c = document.createElement('canvas');
+  c.width = Math.max(1, Math.round(b.w * k)); c.height = Math.max(1, Math.round(b.h * k));
+  c.getContext('2d').drawImage(img, b.x, b.y, b.w, b.h, 0, 0, c.width, c.height);
+  return c;
+}
+// หากรอบกระดาษ: กระดาษใบเสร็จสว่างกว่าพื้นหลัง ใช้เกณฑ์ Otsu แยกส่วนสว่าง แล้วหาแถว/คอลัมน์ที่เป็นกระดาษ
+function findPaper(img) {
+  const c = drawScaled(img, 240), w = c.width, h = c.height;
+  const px = c.getContext('2d').getImageData(0, 0, w, h).data;
+  const lum = new Uint8Array(w * h), hist = new Array(256).fill(0);
+  for (let i = 0; i < w * h; i++) { const v = (px[i * 4] * 299 + px[i * 4 + 1] * 587 + px[i * 4 + 2] * 114) / 1000 | 0; lum[i] = v; hist[v]++; }
+  let sum = 0; for (let t = 0; t < 256; t++) sum += t * hist[t];
+  let sB = 0, wB = 0, best = 0, th = 128;
+  for (let t = 0; t < 256; t++) {
+    wB += hist[t]; if (!wB) continue;
+    const wF = w * h - wB; if (!wF) break;
+    sB += t * hist[t];
+    const between = wB * wF * (sB / wB - (sum - sB) / wF) ** 2;
+    if (between > best) { best = between; th = t; }
+  }
+  const rows = new Array(h).fill(0), cols = new Array(w).fill(0);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (lum[y * w + x] > th) { rows[y]++; cols[x]++; }
+  const span = (arr, need) => { let a = arr.findIndex(v => v > need), b = arr.length - 1 - [...arr].reverse().findIndex(v => v > need); return a < 0 ? null : [a, b]; };
+  const ry = span(rows, w * 0.3), rx = span(cols, h * 0.3);
+  if (!ry || !rx) return null;
+  const area = (rx[1] - rx[0] + 1) * (ry[1] - ry[0] + 1) / (w * h);
+  if (area < 0.2 || area > 0.96) return null;             // หาขอบไม่ชัด ใช้ทั้งรูปดีกว่าตัดผิด
+  const s = img.width / w, m = 0.02;
+  const x0 = Math.max(0, (rx[0] / w - m) * img.width), y0 = Math.max(0, (ry[0] / h - m) * img.height);
+  const x1 = Math.min(img.width, ((rx[1] + 1) / w + m) * img.width), y1 = Math.min(img.height, ((ry[1] + 1) / h + m) * img.height);
+  return s && { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+}
+// ยืดช่วงสว่าง-มืดให้เต็ม (ตัดค่าสุดขั้ว 1%) เฉพาะรูปที่สีจางหรือมืด
+function autoLevels(c) {
+  const g = c.getContext('2d'), im = g.getImageData(0, 0, c.width, c.height), d = im.data, hist = new Array(256).fill(0), n = d.length / 4;
+  for (let i = 0; i < d.length; i += 4) hist[(d[i] * 299 + d[i + 1] * 587 + d[i + 2] * 114) / 1000 | 0]++;
+  let lo = 0, hi = 255, acc = 0;
+  while (lo < 255 && (acc += hist[lo]) < n * 0.01) lo++;
+  acc = 0; while (hi > 0 && (acc += hist[hi]) < n * 0.01) hi--;
+  if (hi - lo < 30 || (lo < 12 && hi > 243)) return c;
+  const k = 255 / (hi - lo);
+  for (let i = 0; i < d.length; i += 4) for (let j = 0; j < 3; j++) d[i + j] = Math.max(0, Math.min(255, (d[i + j] - lo) * k));
+  g.putImageData(im, 0, 0);
+  return c;
+}
+// ลายนิ้วมือของรูป (average hash 16×16) ใช้จับรูปใบเสร็จเดียวกันที่ส่งซ้ำ แม้ถูกบีบอัดใหม่
+function photoHash(img) {
+  const c = document.createElement('canvas'); c.width = 16; c.height = 16;
+  const g = c.getContext('2d'); g.drawImage(img, 0, 0, 16, 16);
+  const d = g.getImageData(0, 0, 16, 16).data, v = [];
+  for (let i = 0; i < d.length; i += 4) v.push(d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114);
+  const avg = v.reduce((a, x) => a + x, 0) / v.length;
+  let hex = '';
+  for (let i = 0; i < v.length; i += 4) hex += ((v[i] > avg) << 3 | (v[i + 1] > avg) << 2 | (v[i + 2] > avg) << 1 | (v[i + 3] > avg)).toString(16);
+  return hex;
+}
+async function prepReceipt(file) {
+  const img = await loadImage(await fileToDataUrl(file));
+  const url = drawScaled(img, 1024).toDataURL('image/jpeg', 0.6);
+  const box = findPaper(img);
+  const blob = await new Promise(r => autoLevels(drawScaled(img, 1600, box)).toBlob(r, 'image/jpeg', 0.85));
+  return { url, aiBlob: blob, hash: photoHash(img), cropped: !!box };
+}
+const blobToB64 = blob => new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(String(fr.result).split(',')[1] || ''); fr.onerror = rej; fr.readAsDataURL(blob); });
+
+// เลขประจำตัวผู้เสียภาษี 13 หลัก ตรวจหลักสุดท้ายตามสูตรกรมสรรพากร
+const cleanTaxId = x => String(x || '').replace(/\D/g, '');
+function taxIdOk(x) {
+  const d = cleanTaxId(x);
+  if (d.length !== 13) return false;
+  let s = 0; for (let i = 0; i < 12; i++) s += +d[i] * (13 - i);
+  return (11 - s % 11) % 10 === +d[12];
+}
+
+// ส่งออกหลายชีตในไฟล์เดียว: sheets = [[ชื่อชีต, แถวข้อมูล]]
+const exportBook = (sheets, filename) => {
+  const wb = XLSX.utils.book_new();
+  sheets.forEach(([name, rows]) => XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows.length ? rows : [{ '': 'ไม่มีข้อมูล' }]), name.slice(0, 31)));
+  const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+  downloadBlob(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), `${filename}.xlsx`);
+};
+// CSV แบบมี BOM ให้ Excel เปิดภาษาไทยได้ถูก
+const exportCsv = (rows, filename) => {
+  const head = Object.keys(rows[0] || {});
+  const esc = v => { const t = v == null ? '' : String(v); return /[",\n\r]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t; };
+  const text = '﻿' + [head, ...rows.map(r => head.map(k => r[k]))].map(r => r.map(esc).join(',')).join('\r\n');
+  downloadBlob(new Blob([text], { type: 'text/csv;charset=utf-8' }), `${filename}.csv`);
+};
+
 const exportToExcel = (data, filename) => {
   const ws = XLSX.utils.json_to_sheet(data);
   const wb = XLSX.utils.book_new();
@@ -1965,6 +2084,46 @@ const BILL_CAT_ICON = { mat: '🧱', fuel: '⛽', freight: '🚚', tools: '🔧'
 const lineCat = l => l.kind === 'stock' ? 'stock' : (CAT[l.cat] ? l.cat : 'misc');
 const billHasCat = (b, k) => b.lines.some(l => lineCat(l) === k);
 
+/* ---------- ตรวจบิลซ้ำ (กติกาเดียวกับ dupCheck ใน AppSync.gs) ---------- */
+const normVendor = x => String(x || '').toLowerCase().replace(/[\s\-_.()"'“”]/g, '').replace(/^(ร้าน|บริษัท|บจก|หจก)/, '');
+const billGross = b => r2(sum(b.lines, l => l.amount) + (+b.vat || 0));
+function findDupBills(s, x) {
+  return s.bills.filter(b => b.id !== x.id && b.status !== 'rejected').map(b => {
+    const why = [];
+    if ((x.photoHashes || []).some(h => h && (b.photoHashes || []).includes(h))) why.push('รูปใบเสร็จเดียวกัน');
+    if (x.taxId && x.receiptNo && b.taxId === x.taxId && normVendor(b.receiptNo) === normVendor(x.receiptNo)) why.push('เลขผู้เสียภาษีและเลขที่ใบเสร็จเดียวกัน');
+    else if (x.date && b.date === x.date && normVendor(b.vendor) && normVendor(b.vendor) === normVendor(x.vendor) && Math.abs(billGross(b) - (+x.total || 0)) <= 1) why.push('ร้าน วันที่ และยอดเดียวกัน');
+    return why.length ? { id: b.id, no: b.no, why: why.join(' · '), staffId: b.staffId } : null;
+  }).filter(Boolean).slice(0, 5);
+}
+const billDupKey = b => ({ id: b.id, taxId: b.taxId, receiptNo: b.receiptNo, vendor: b.vendor, date: b.date, total: billGross(b), photoHashes: b.photoHashes });
+
+/* ---------- จับคู่ใบเบิกสำรองจ่าย (ADV) กับบิลที่นำมาเคลียร์ ---------- */
+// หมวดของบิลที่ถือว่าตรงกับประเภทใบเบิก (อื่นๆ = ตรงได้ทุกหมวด)
+const ADV_CATS = { fuel: ['fuel'], material: ['mat', 'stock', 'tools'] };
+function advances(s, staffId) {
+  return s.cash.filter(c => isAdvance(c) && (!staffId || c.staffId === staffId)).map(c => {
+    const bills = s.bills.filter(b => b.advId === c.id && b.claimType === 'advance' && b.status !== 'rejected');
+    const cleared = r2(sum(bills.filter(billDone), b => billTotals(s, b).cash));
+    const pending = r2(sum(bills.filter(b => b.status === 'pending'), b => billTotals(s, b).cash));
+    return { c, bills, cleared, pending, left: r2(c.amount - cleared - pending) };
+  }).sort((a, b) => a.c.date.localeCompare(b.c.date));
+}
+const advLabel = c => `${c.no || 'เงินทดรอง'} · ${CASH_LABEL[c.kind] || ''} ${baht(c.amount)} (${thDate(c.date)})`;
+// เลือกใบเบิกที่น่าจะเป็นของบิลนี้: ยังเหลือเงิน > โครงการตรง > ประเภทตรง > ยอดพอ > เบิกก่อนวันบิล > เก่าสุดก่อน
+function suggestAdv(s, x) {
+  const cats = new Set((x.lines || []).map(l => l.cat));
+  const list = advances(s, x.staffId).map(a => {
+    const own = a.bills.find(b => b.id === x.id);
+    return own ? { ...a, left: r2(a.left + billTotals(s, own).cash) } : a;
+  }).filter(a => a.left > 0.009);
+  if (!list.length) return '';
+  const score = a => (a.c.projectId && a.c.projectId === x.projectId ? 3 : 0)
+    + (ADV_CATS[a.c.kind] ? (ADV_CATS[a.c.kind].some(k => cats.has(k)) ? 2 : -1) : 0)
+    + (a.left + 1 >= (x.amount || 0) ? 2 : 0) + (a.c.date <= (x.date || '9999') ? 1 : 0);
+  return list.map(a => ({ a, sc: score(a) })).sort((p, q) => q.sc - p.sc || p.a.c.date.localeCompare(q.a.c.date))[0].a.c.id;
+}
+
 function CashView() {
   const { s, me, mut, ask } = useApp();
   const own = !isOffice(me);
@@ -1975,6 +2134,11 @@ function CashView() {
   const doc = useDocPdf();
   const editBill = id => { setForm('edit:' + id); window.scrollTo({ top: 0, behavior: 'smooth' }); };
   const editing = typeof form === 'string' && form.startsWith('edit:') ? s.bills.find(b => b.id === form.slice(5)) : null;
+  const [sentId, setSentId] = useState(null);
+  const sent = sentId && s.bills.find(b => b.id === sentId);
+  const closeBill = id => { setForm(null); if (id) { setSentId(id); window.scrollTo({ top: 0, behavior: 'smooth' }); } };
+  const [panel, setPanel] = useState(null);   // 'recon' = จับคู่ใบเบิก · 'report' = รายงานค่าใช้จ่าย
+  const togglePanel = k => setPanel(p => p === k ? null : k);
   const [filter, setFilter] = useState('all');
   const [cat, setCat] = useState('');
   const [q, setQ] = useState('');
@@ -2006,15 +2170,20 @@ function CashView() {
       <div className="actions">
         {isManager(s) && <button className="btn" onClick={() => setForm(form === 'cash' ? null : 'cash')}>+ เบิกสำรองจ่าย</button>}
         {isLead(s) && <button className="btn" onClick={() => setForm(form === 'line' ? null : 'line')}>นำเข้าจาก LINE</button>}
-        <button className="btn btn-primary" disabled={own && !me.staffId} onClick={() => setForm(form === 'bill' ? null : 'bill')}>+ เคลียร์สำรองจ่าย</button>
-      
+        <button className="btn btn-primary" disabled={own && !me.staffId} onClick={() => { setSentId(null); setForm(form === 'bill' ? null : 'bill'); }}>+ เคลียร์สำรองจ่าย</button>
+        <button className="btn" aria-pressed={panel === 'recon'} onClick={() => togglePanel('recon')}>🔗 จับคู่ใบเบิก</button>
+        {!own && <button className="btn" aria-pressed={panel === 'report'} onClick={() => togglePanel('report')}>📊 รายงานค่าใช้จ่าย</button>}
+
         {isAllowed(s, 'export-data') && <button className="btn btn-sm" onClick={() => exportToExcel(prepareCashExportData(s, bills), 'Cash')}>Export Excel</button>}
         {isAllowed(s, 'export-data') && <button className="btn btn-sm" onClick={() => { const el = document.querySelector('.bills'); el && exportToPDF(el, 'Cash'); }}>Export PDF</button>}
       </div>
     </div>
     {own && !me.staffId && <div className="panel hint warn">บัญชีของคุณยังไม่ได้ผูกกับชื่อผู้เบิก จึงยังส่งบิลไม่ได้ แจ้ง Staff office ให้ผูกบัญชีที่หน้า ตั้งค่า → ผู้ใช้งานและสิทธิ์เข้าถึง</div>}
-    {form === 'bill' && <BillForm onClose={() => setForm(null)} />}
-    {editing && <BillForm key={editing.id} edit={editing} onClose={() => setForm(null)} />}
+    {form === 'bill' && <BillForm onClose={closeBill} />}
+    {editing && <BillForm key={editing.id} edit={editing} onClose={closeBill} />}
+    {sent && !form && <SentBox b={sent} onClose={() => setSentId(null)} />}
+    {panel === 'recon' && <ReconPanel staffList={staffList} onClose={() => setPanel(null)} onOpenBill={editBill} />}
+    {panel === 'report' && <ExpenseReport onClose={() => setPanel(null)} />}
     {form === 'cash' && <CashForm onClose={() => setForm(null)} />}
     {form === 'line' && <LineImport onClose={() => setForm(null)} />}
 
@@ -2090,6 +2259,182 @@ function CashView() {
   </>);
 }
 
+/* ส่งบิลแล้ว: บอกว่ารอใคร และส่งข้อความแจ้งผู้อนุมัติเข้า LINE ได้ในคลิกเดียว */
+const appLink = () => { try { return location.origin + location.pathname + '#cash'; } catch (e) { return ''; } };
+function SentBox({ b, onClose }) {
+  const { s } = useApp();
+  const t = billTotals(s, b);
+  const step = nextStep(b);
+  const text = [`📨 ขออนุมัติ${billDocTitle(b)} ${b.no || ''}`.trim(), `ผู้เบิก: ${staffName(s, b.staffId)}`, `ร้าน: ${b.vendor} (${thDate(b.date)})`,
+    `ยอด: ${baht(t.cash)} · ${projLabel(s, b.projectId)}`, step ? `รอ${ROLE_SHORT[step]}อนุมัติ` : '', `เปิดแอป: ${appLink()}`].filter(Boolean).join('\n');
+  return (
+    <section className="panel" style={{ borderColor: 'var(--ok)' }} role="status">
+      <div className="row between">
+        <div><b style={{ color: 'var(--ok)' }}>✓ ส่ง {b.no} แล้ว</b><p className="hint">{b.vendor} · {baht(t.cash)} · {b.status === 'pending' ? `รอ${ROLE_SHORT[step]}อนุมัติ · แจ้งเตือนในแอปแล้ว` : billState(b)[1]}</p></div>
+        <div className="row">
+          {b.status === 'pending' && <button className="btn btn-primary" onClick={() => openLineShare(text)}>💬 แจ้ง{ROLE_SHORT[step]}ทาง LINE</button>}
+          <button className="btn btn-ghost" onClick={onClose}>ปิด</button>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/* จับคู่ใบเบิกสำรองจ่ายกับบิลที่นำมาเคลียร์ */
+function ReconPanel({ staffList, onClose }) {
+  const { s, me, mut } = useApp();
+  const office = isOffice(me);
+  const [all, setAll] = useState(false);
+  const T = todayISO();
+  const ids = new Set(staffList.map(x => x.id));
+  const loose = s.bills.filter(b => ids.has(b.staffId) && b.claimType === 'advance' && b.status !== 'rejected' && !(b.advId && s.cash.some(c => c.id === b.advId)));
+  const autoMatch = () => mut(d => {
+    let n = 0;
+    d.bills.filter(b => ids.has(b.staffId) && b.claimType === 'advance' && b.status !== 'rejected' && !(b.advId && d.cash.some(c => c.id === b.advId)))
+      .sort((a, b) => a.date.localeCompare(b.date))
+      .forEach(b => {
+        const id = suggestAdv(d, { id: b.id, staffId: b.staffId, projectId: b.projectId, date: b.date, lines: b.lines, amount: billTotals(d, b).cash });
+        if (id) { b.advId = id; n++; }
+      });
+    if (!n) return 'ไม่มีใบเบิกที่เหลือเงินพอจะจับคู่ให้บิลเหล่านี้';
+  }, 'จับคู่บิลกับใบเบิกแล้ว ตรวจผลในตารางด้านล่าง');
+  const tone = a => a.left < -0.009 ? ['bad', `เกิน ${baht(-a.left)}`] : a.pending > 0 ? ['warn', 'มีบิลรออนุมัติ'] : a.left <= 0.009 ? ['ok', 'เคลียร์ครบ']
+    : a.c.date < addDays(T, -7) ? ['warn', 'ค้างเกิน 7 วัน'] : ['gold', 'รอเคลียร์'];
+
+  return (
+    <section className="panel formpanel">
+      <div className="panel-head"><h2>🔗 จับคู่ใบเบิกสำรองจ่ายกับบิลที่เคลียร์</h2>
+        <div className="row"><label className="check small"><input type="checkbox" checked={all} onChange={e => setAll(e.target.checked)} />แสดงใบเบิกที่เคลียร์ครบแล้ว</label>
+          <button className="btn btn-sm btn-ghost" onClick={onClose}>ปิด</button></div></div>
+      <p className="hint" style={{ marginBottom: 10 }}>ตอนส่งบิล ระบบจับคู่กับใบเบิกที่ยังเหลือเงินให้อัตโนมัติ (โครงการตรง → ประเภทค่าใช้จ่ายตรง → ยอดพอ → เบิกก่อน) แก้ได้ในฟอร์มบิล</p>
+      {loose.length > 0 && (
+        <div className="subbox row between" style={{ marginBottom: 12 }}>
+          <span className="small">⚠️ บิลเคลียร์สำรองจ่ายที่ยังไม่ระบุใบเบิก {loose.length} ใบ · {baht(sum(loose, b => billTotals(s, b).cash))} <span className="muted">({loose.map(b => b.no).join(', ')})</span></span>
+          {office && <button className="btn btn-sm btn-primary" onClick={autoMatch}>จับคู่อัตโนมัติ</button>}
+        </div>
+      )}
+      {staffList.map(st => {
+        const list = advances(s, st.id).filter(a => all || a.left > 0.009 || a.left < -0.009 || a.pending > 0);
+        if (!list.length) return null;
+        return (
+          <div key={st.id} style={{ marginTop: 10 }}>
+            <h3 style={{ marginBottom: 6 }}>{st.name} <span className="hint">คงเหลือรวม {baht(sum(list, a => a.left))}</span></h3>
+            <div className="tbl-wrap"><table className="tbl recon">
+              <thead><tr><th>ใบเบิก</th><th>ประเภท / โครงการ</th><th className="r">เบิก</th><th className="r">เคลียร์แล้ว</th><th className="r">รออนุมัติ</th><th className="r">คงเหลือ</th><th>สถานะ</th><th>บิลที่ใช้เคลียร์</th></tr></thead>
+              <tbody>{list.map(a => {
+                const [tn, tl] = tone(a);
+                return (
+                  <tr key={a.c.id}>
+                    <td className="nowrap"><b className="num">{a.c.no || '—'}</b><span className="sub">{thDate(a.c.date)}</span></td>
+                    <td>{CASH_LABEL[a.c.kind] || '—'}<span className="sub">{a.c.projectId ? projLabel(s, a.c.projectId) : 'ไม่ระบุโครงการ'}</span></td>
+                    <td className="r num">{num(a.c.amount)}</td>
+                    <td className="r num">{num(a.cleared)}</td>
+                    <td className="r num">{a.pending ? num(a.pending) : '—'}</td>
+                    <td className="r num"><b>{num(a.left)}</b></td>
+                    <td><span className={'pill ' + tn}>{tl}</span></td>
+                    <td>{a.bills.length ? a.bills.map(b => <span key={b.id} className={'pill plain ' + (b.status === 'pending' ? 'warn' : '')} title={`${b.vendor} ${baht(billTotals(s, b).cash)}`}>{b.no}</span>) : <span className="hint">ยังไม่มี</span>}</td>
+                  </tr>
+                );
+              })}</tbody>
+            </table></div>
+          </div>
+        );
+      })}
+      {staffList.every(st => !advances(s, st.id).some(a => all || a.left > 0.009 || a.left < -0.009 || a.pending > 0)) && <p className="empty">{all ? 'ยังไม่มีใบเบิกสำรองจ่าย' : 'ไม่มีใบเบิกที่ค้างเคลียร์ 🎉'}</p>}
+    </section>
+  );
+}
+
+/* รายงานค่าใช้จ่าย: สรุปตามพนักงาน / แผนก / โครงการ / หมวด แล้วส่งออก Excel หรือ CSV ให้บัญชี */
+const monthStart = d => d.slice(0, 8) + '01';
+const DEPT_NONE = 'ไม่ระบุแผนก';
+const DEPTS = ['หน้างาน', 'จัดซื้อ', 'บัญชี / การเงิน', 'สำนักงาน', 'ขนส่ง'];
+const staffDept = (s, id) => (s.staff.find(x => x.id === id) || {}).dept || DEPT_NONE;
+const GROUPS = [['staff', 'พนักงาน'], ['dept', 'แผนก'], ['project', 'โครงการ'], ['cat', 'หมวดค่าใช้จ่าย']];
+function billExportRow(s, b) {
+  const t = billTotals(s, b);
+  const adv = b.advId && s.cash.find(c => c.id === b.advId);
+  return { 'เลขที่': b.no || '', 'วันที่': b.date, 'พนักงาน': staffName(s, b.staffId), 'แผนก': staffDept(s, b.staffId), 'โครงการ': projName(s, b.projectId),
+    'ร้าน': b.vendor, 'เลขผู้เสียภาษีร้าน': b.taxId || '', 'เลขที่ใบเสร็จ': b.receiptNo || '', 'ชนิดเอกสาร': DOC_TYPE[b.docType] || '',
+    'ประเภท': CLAIM[b.claimType], 'หมวด': [...new Set(b.lines.map(l => l.kind === 'stock' ? 'ซื้อเข้าสต๊อก' : (CAT[l.cat] || CAT.misc).label))].join(', '),
+    'รายการ': b.lines.map(l => l.descr).filter(Boolean).join(', '), 'ก่อน VAT': t.net, 'VAT': t.vat, 'หัก ณ ที่จ่าย': t.wht, 'ยอดสุทธิ': t.cash,
+    'สถานะ': billState(b)[1], 'ใบเบิก': adv ? adv.no || '' : '', 'AI อ่าน': b.ai ? 'ใช่' : '', 'หมายเหตุบิลซ้ำ': b.dupNote || '' };
+}
+function ExpenseReport({ onClose }) {
+  const { s } = useApp();
+  const T = todayISO();
+  const [f, setF] = useState({ from: monthStart(T), to: T, status: 'done', group: 'project' });
+  const set = (k, v) => setF(p => ({ ...p, [k]: v }));
+  const bills = s.bills.filter(b => b.date >= f.from && b.date <= f.to && b.status !== 'rejected' && (f.status === 'all' || billDone(b)))
+    .sort((a, b) => a.date.localeCompare(b.date) || String(a.no).localeCompare(String(b.no)));
+  const groups = new Map();
+  const add = (key, label, b, net, vat, wht) => {
+    const g = groups.get(key) || { label, ids: new Set(), net: 0, vat: 0, wht: 0 };
+    g.ids.add(b.id); g.net += net; g.vat += vat; g.wht += wht; groups.set(key, g);
+  };
+  bills.forEach(b => {
+    const t = billTotals(s, b);
+    if (f.group === 'cat') {
+      // แบ่ง VAT / หัก ณ ที่จ่าย ตามสัดส่วนยอดของแต่ละบรรทัด
+      b.lines.forEach(l => { const k = lineCat(l), p = t.net ? +l.amount / t.net : 0; add(k, k === 'stock' ? 'ซื้อเข้าสต๊อก' : CAT[k].label, b, +l.amount, t.vat * p, t.wht * p); });
+    } else if (f.group === 'staff') add(b.staffId, staffName(s, b.staffId), b, t.net, t.vat, t.wht);
+    else if (f.group === 'dept') { const d = staffDept(s, b.staffId); add(d, d, b, t.net, t.vat, t.wht); }
+    else add(b.projectId, projName(s, b.projectId), b, t.net, t.vat, t.wht);
+  });
+  const rows = [...groups.values()].map(g => ({ ...g, n: g.ids.size, total: r2(g.net + g.vat - g.wht) })).sort((a, b) => b.total - a.total);
+  const tot = { n: bills.length, net: sum(bills, b => billTotals(s, b).net), vat: sum(bills, b => billTotals(s, b).vat), wht: sum(bills, b => billTotals(s, b).wht) };
+  tot.total = r2(tot.net + tot.vat - tot.wht);
+  const top = rows[0] ? rows[0].total : 0;
+  const gName = (GROUPS.find(g => g[0] === f.group) || [])[1];
+  const fname = `รายงานค่าใช้จ่าย-${f.from}-ถึง-${f.to}`;
+  const summaryRows = () => rows.map(r => ({ [gName]: r.label, 'จำนวนบิล': r.n, 'ก่อน VAT': r2(r.net), 'VAT': r2(r.vat), 'หัก ณ ที่จ่าย': r2(r.wht), 'ยอดสุทธิ': r.total }));
+  const lineRows = () => bills.flatMap(b => b.lines.map(l => {
+    const acc = l.kind === 'stock' ? '1150' : (CAT[l.cat] || CAT.misc).acc;
+    return { 'เลขที่': b.no || '', 'วันที่': b.date, 'พนักงาน': staffName(s, b.staffId), 'แผนก': staffDept(s, b.staffId), 'โครงการ': projName(s, b.projectId),
+      'ร้าน': b.vendor, 'หมวด': l.kind === 'stock' ? 'ซื้อเข้าสต๊อก' : (CAT[l.cat] || CAT.misc).label, 'รหัสบัญชี': acc, 'ชื่อบัญชี': ACCOUNTS[acc] || '', 'รายละเอียด': l.descr, 'ก่อน VAT': +l.amount };
+  }));
+
+  return (
+    <section className="panel formpanel">
+      <div className="panel-head"><h2>📊 รายงานค่าใช้จ่าย</h2><button className="btn btn-sm btn-ghost" onClick={onClose}>ปิด</button></div>
+      <div className="form">
+        <label className="field"><span>ตั้งแต่วันที่</span><input id="rp-from" type="date" value={f.from} max={f.to} onChange={e => set('from', e.target.value)} /></label>
+        <label className="field"><span>ถึงวันที่</span><input id="rp-to" type="date" value={f.to} min={f.from} onChange={e => set('to', e.target.value)} /></label>
+        <label className="field"><span>บิลที่นับ</span><select id="rp-st" value={f.status} onChange={e => set('status', e.target.value)}><option value="done">อนุมัติแล้ว / จ่ายแล้ว</option><option value="all">รวมที่รออนุมัติ</option></select></label>
+        <label className="field"><span>สรุปตาม</span><select id="rp-g" value={f.group} onChange={e => set('group', e.target.value)}>{GROUPS.map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></label>
+      </div>
+      <div className="row" style={{ margin: '10px 0' }}>
+        {[['เดือนนี้', monthStart(T), T], ['เดือนก่อน', monthStart(addDays(monthStart(T), -1)), addDays(monthStart(T), -1)], ['30 วัน', addDays(T, -29), T]].map(([l, a, b]) =>
+          <button key={l} className={'chip ' + (f.from === a && f.to === b ? 'now' : '')} onClick={() => setF(p => ({ ...p, from: a, to: b }))}>{l}</button>)}
+      </div>
+      <div className="kpis" style={{ marginBottom: 12 }}>
+        <div className="kpi total"><span className="label">ยอดสุทธิ</span><span className="value">{baht(tot.total)}</span><span className="hint">{tot.n} บิล · {thDate(f.from)} – {thDate(f.to)}</span></div>
+        <div className="kpi"><span className="label">ก่อน VAT</span><span className="value">{baht(tot.net)}</span></div>
+        <div className="kpi"><span className="label">VAT (ภาษีซื้อ)</span><span className="value">{baht(tot.vat)}</span></div>
+        <div className="kpi"><span className="label">หัก ณ ที่จ่าย</span><span className="value">{baht(tot.wht)}</span></div>
+      </div>
+      {rows.length === 0 ? <p className="empty">ไม่มีบิลในช่วงวันที่นี้</p> : (
+        <div className="tbl-wrap"><table className="tbl">
+          <thead><tr><th>{gName}</th><th className="r">บิล</th><th className="r">ก่อน VAT</th><th className="r">VAT</th><th className="r">หัก ณ ที่จ่าย</th><th className="r">ยอดสุทธิ</th><th>สัดส่วน</th></tr></thead>
+          <tbody>{rows.map(r => (
+            <tr key={r.label}>
+              <td>{r.label}</td><td className="r num">{r.n}</td><td className="r num">{num(r.net)}</td><td className="r num">{num(r.vat)}</td><td className="r num">{num(r.wht)}</td>
+              <td className="r num"><b>{num(r.total)}</b></td>
+              <td style={{ minWidth: 110 }}><div className="row" style={{ flexWrap: 'nowrap' }}><div className="bars" style={{ flex: 1 }}><i style={{ width: (top ? r.total / top * 100 : 0) + '%' }} /></div><span className="small num">{tot.total ? Math.round(r.total / tot.total * 100) : 0}%</span></div></td>
+            </tr>
+          ))}</tbody>
+          <tfoot><tr><td>รวม</td><td className="r num">{tot.n}</td><td className="r num">{num(tot.net)}</td><td className="r num">{num(tot.vat)}</td><td className="r num">{num(tot.wht)}</td><td className="r num">{num(tot.total)}</td><td /></tr></tfoot>
+        </table></div>
+      )}
+      <div className="actions" style={{ marginTop: 12 }}>
+        <button className="btn btn-primary" disabled={!bills.length} onClick={() => exportBook([[`สรุปตาม${gName}`, summaryRows()], ['รายละเอียดบิล', bills.map(b => billExportRow(s, b))], ['รายการแยกบัญชี', lineRows()]], fname)}>📥 Excel (3 ชีต)</button>
+        <button className="btn" disabled={!bills.length} onClick={() => exportCsv(bills.map(b => billExportRow(s, b)), fname)}>CSV รายละเอียดบิล</button>
+        <span className="hint">Excel มีชีตสรุป รายละเอียดบิล (เลขผู้เสียภาษี เลขที่ใบเสร็จ ใบเบิก) และรายการแยกรหัสบัญชี</span>
+      </div>
+    </section>
+  );
+}
+
 function BillCard({ b, hl, onEdit }) {
   const { s, mut, ask, notify, showPhoto } = useApp();
   const [mode, setMode] = useState(null);
@@ -2101,6 +2446,16 @@ function BillCard({ b, hl, onEdit }) {
   const step = nextStep(b);
   const may = canApprove(s, b);
   const itemOf = l => s.items.find(i => i.id === l.itemId) || {};
+  const adv = b.claimType === 'advance' && b.advId && s.cash.find(c => c.id === b.advId);
+  // ข้อควรตรวจสำหรับผู้อนุมัติ (แสดงเฉพาะบิลที่ยังไม่ปิด)
+  const flags = [];
+  if (b.status === 'pending' || b.status === 'rejected') {
+    const dups = findDupBills(s, billDupKey(b));
+    dups.forEach(d => flags.push(['bad', `อาจซ้ำกับ ${d.no || 'บิลอื่น'} (${d.why})`]));
+    if (b.dupNote) flags.push(['warn', b.dupNote]);
+    if (b.aiTotal > 0 && Math.abs(billGross(b) - b.aiTotal) > 1) flags.push(['warn', `ยอดในบิล ${baht(billGross(b))} ต่างจากที่ AI อ่านจากใบเสร็จ ${baht(b.aiTotal)}`]);
+    if (b.taxId && !taxIdOk(b.taxId)) flags.push(['warn', `เลขผู้เสียภาษี ${b.taxId} ไม่ถูกต้องตามสูตร`]);
+  }
   const attach = async e => {
     const file = e.target.files && e.target.files[0];
     e.target.value = '';
@@ -2128,6 +2483,8 @@ function BillCard({ b, hl, onEdit }) {
           </div>
         </div>
         <p className="meta"><span className="num">{b.no}</span> · {thDate(b.date)} · {staffName(s, b.staffId)} · {projName(s, b.projectId)}{b.src ? ` · ส่งใน LINE โดย ${b.src.sender} ${b.src.at.slice(11)} น.` : ''}</p>
+        {(b.taxId || b.receiptNo || adv) && <p className="meta">{b.taxId ? `เลขผู้เสียภาษี ${b.taxId}` : ''}{b.taxId && b.receiptNo ? ' · ' : ''}{b.receiptNo ? `ใบเสร็จ ${b.receiptNo}` : ''}{adv ? `${b.taxId || b.receiptNo ? ' · ' : ''}เคลียร์ ${adv.no || 'ใบเบิก'}` : ''}</p>}
+        {flags.length > 0 && <Checks list={flags} />}
         <ul className="lines">
           {b.lines.map(l => (
             <li key={l.id} style={hl && lineCat(l) !== hl ? { opacity: .45 } : undefined}>
@@ -2198,9 +2555,22 @@ function BillCard({ b, hl, onEdit }) {
 
 const newLine = (cat = 'mat') => ({ id: uid(), cat, descr: '', itemId: '', qty: '', amount: '' });
 
+/* AI อ่านรูป: เชื่อม Google Sheets อยู่ → ส่งผ่าน Apps Script ไปที่ Gemini (key อยู่ฝั่งเซิร์ฟเวอร์)
+   เปิดผ่าน claude.ai → ใช้ AI ของ claude.ai · ทั้งสองแบบเรียกด้วย ai.json(prompt, { images: blob }) เหมือนกัน */
+const sheetAI = remote => ({
+  via: 'gemini',
+  json: async (prompt, opt = {}) => {
+    const blob = opt.images;
+    const res = await callSheet(remote.url, 'ai', { token: remote.token, prompt, image: await blobToB64(blob), mime: blob.type || 'image/jpeg' });
+    return res.json;
+  },
+});
 function useReceiptAI() {
+  const { rs } = useApp() || {};
+  const remote = rs && rs.remote && rs.remote.token ? rs.remote : null;
   const [ai, setAi] = useState(null);
   useEffect(() => {
+    if (remote) { setAi(() => sheetAI(remote)); return; }
     let alive = true;
     (async () => {
       try {
@@ -2212,116 +2582,191 @@ function useReceiptAI() {
       } catch (e) { /* ไม่มี AI ก็กรอกเองได้ */ }
     })();
     return () => { alive = false; };
-  }, []);
+  }, [remote && remote.url, remote && remote.token]);
   return [ai, setAi];
+}
+// ข้อความผิดพลาดของ AI ที่ผู้ใช้เข้าใจได้ · ปิดปุ่ม AI เมื่อใช้ไม่ได้ถาวร (ยังไม่ตั้ง key / ไม่ได้อนุญาต)
+const AI_OFF = ['not_granted', 'capability_disabled', 'capability_removed', 'unavailable', 'no_key'];
+function aiErrorText(e, what = 'ใบเสร็จ') {
+  const code = e && e.code;
+  if (code === 'not_granted') return `ไม่ได้อนุญาตให้ใช้ AI อ่าน${what} กรอกข้อมูลเองได้ตามปกติ`;
+  if (code === 'invalid_json') return `AI อ่าน${what}นี้ไม่ออก ลองถ่ายให้ตรงและชัดขึ้น หรือกรอกเอง`;
+  if (code === 'rate_limited' && !(e.message || '').match(/[ก-๙]/)) return 'ใช้งาน AI ถี่เกินไป รอสักครู่แล้วลองใหม่';
+  if (e && e.message && /[ก-๙]/.test(e.message)) return e.message;   // ข้อความภาษาไทยจากเซิร์ฟเวอร์
+  return `อ่าน${what}ไม่สำเร็จ กรอกข้อมูลเองได้ตามปกติ`;
 }
 
 /* แปลงบิลที่ส่งไปแล้วกลับเป็นค่าในฟอร์ม เพื่อแก้ไขก่อนอนุมัติ */
 function billToForm(b) {
   const net = sum(b.lines, l => l.amount);
   const pct = net && b.wht ? Math.round(b.wht / net * 100) : 0;
+  const photos = b.photos && b.photos.length ? b.photos : b.photo ? [b.photo] : [];
   return {
     claimType: b.claimType, staffId: b.staffId, projectId: b.projectId, date: b.date, vendor: b.vendor,
+    taxId: b.taxId || '', receiptNo: b.receiptNo || '', docType: b.docType || '',
     // VAT ที่เท่ากับ 7% อยู่แล้วให้เว้นว่าง จะได้คำนวณใหม่อัตโนมัติเมื่อแก้ยอด
     vatOn: b.vat > 0, vat: b.vat > 0 && Math.abs(b.vat - r2(net * 0.07)) > 0.01 ? String(b.vat) : '', whtPct: [1, 3, 5].includes(pct) ? String(pct) : '0',
-    photos: b.photos && b.photos.length ? b.photos : b.photo ? [b.photo] : [], ai: !!b.ai, aiTotal: 0,
+    photos, hashes: (b.photoHashes || []).slice(0, photos.length), aiBlobs: [], ai: !!b.ai, aiTotal: b.aiTotal || 0, aiNote: '',
+    advId: b.advId || '', advAuto: !b.advId, dupAck: !!b.dupNote,
     lines: b.lines.map(l => ({ id: l.id, cat: l.kind === 'stock' ? 'stock' : l.cat, descr: l.descr || '', itemId: l.itemId || '', qty: l.qty === '' || l.qty == null ? '' : String(l.qty), amount: String(l.amount) })),
   };
 }
 
+const DOC_TYPE = { tax: 'ใบกำกับภาษี', receipt: 'ใบเสร็จรับเงิน', cash: 'บิลเงินสด', other: 'อื่น ๆ' };
+const receiptPrompt = () => `รูปที่แนบคือใบเสร็จ บิลเงินสด หรือใบกำกับภาษีจากร้านค้าในประเทศไทย ของบริษัทรับเหมาก่อสร้าง
+อ่านแล้วตอบเป็น JSON อย่างเดียว ตามรูปแบบนี้:
+{"docType":"tax","date":"YYYY-MM-DD","vendor":"ชื่อร้าน","taxId":"เลข 13 หลักของผู้ขาย","receiptNo":"เลขที่เอกสาร","vat":0,"total":0,"items":[{"descr":"รายการ","amount":0,"category":"mat"}],"note":"สิ่งที่อ่านไม่ชัดหรือควรตรวจ"}
+กติกา:
+- docType: tax = ใบกำกับภาษี, receipt = ใบเสร็จรับเงิน, cash = บิลเงินสด, other = อื่น ๆ
+- date เป็นปี ค.ศ. ถ้าใบเสร็จเป็นปี พ.ศ. ให้ลบ 543
+- vendor คือชื่อร้านหรือบริษัทผู้ขาย (ไม่ใช่ชื่อลูกค้าหรือบริษัทผู้ซื้อ)
+- taxId คือเลขประจำตัวผู้เสียภาษี 13 หลักของผู้ขาย เป็นตัวเลขล้วน ถ้าไม่มีให้เป็น null ห้ามใช้เลขของผู้ซื้อ
+- receiptNo คือเลขที่ใบเสร็จ / ใบกำกับภาษี / บิล
+- amount คือยอดก่อน VAT ของแต่ละรายการ ถ้าใบเสร็จแสดงราคารวม VAT ให้ถอด VAT ออกตามสัดส่วน ผลรวม amount ต้องเท่ากับยอดก่อน VAT ของทั้งใบ
+- vat คือภาษีมูลค่าเพิ่มทั้งใบ ถ้าไม่มีให้เป็น 0
+- total คือยอดรวมสุทธิที่ต้องจ่ายทั้งใบ (รวม VAT แล้ว) ตามที่พิมพ์ในใบเสร็จ
+- รวมรายการเล็กที่ประเภทเดียวกันได้ ไม่เกิน 6 รายการ
+- category เลือกจาก: ${CATS.map(c => `${c.key} = ${c.label}`).join('; ')}
+- ช่องที่อ่านไม่ได้ให้เป็น null`;
+
+// ผลตรวจก่อนส่ง: [ระดับ, ข้อความ] ระดับ ok / info / warn / bad (bad = ต้องแก้หรือยืนยันก่อนส่ง)
+function billChecks(s, f, { gross, cash, dups, edit }) {
+  const out = [];
+  if (f.ai && f.aiTotal > 0) out.push(Math.abs(gross - f.aiTotal) <= 1
+    ? ['ok', `ยอดรวมตรงกับใบเสร็จ ${baht(f.aiTotal)}`]
+    : ['bad', `ยอดรวมในใบเสร็จ ${baht(f.aiTotal)} ไม่ตรงกับยอดในฟอร์ม ${baht(gross)} ตรวจรายการหรือ VAT`]);
+  const tid = cleanTaxId(f.taxId);
+  if (tid) out.push(taxIdOk(tid) ? ['ok', `เลขผู้เสียภาษีร้านถูกต้อง ${tid}`] : ['warn', `เลขผู้เสียภาษี ${tid} ไม่ถูกต้อง (ต้องมี 13 หลักและหลักสุดท้ายต้องตรงสูตร) ตรวจกับใบเสร็จอีกครั้ง`]);
+  else if (f.vatOn && (+f.vat > 0 || f.vat === '')) out.push(['info', 'มี VAT แต่ยังไม่มีเลขผู้เสียภาษีของร้าน ใบกำกับภาษีเต็มรูปต้องมีเลขนี้ถึงจะใช้ขอคืน VAT ได้']);
+  if (f.date > todayISO()) out.push(['bad', 'วันที่ในใบเสร็จเป็นวันในอนาคต']);
+  else if (f.date && f.date < addDays(todayISO(), -60)) out.push(['warn', `ใบเสร็จเก่ากว่า 60 วัน (${thDate(f.date)})`]);
+  dups.forEach(d => out.push(['bad', `อาจเป็นบิลซ้ำกับ ${d.no || 'บิลอื่น'}${d.staffId ? ` ของ${staffName(s, d.staffId)}` : ''}: ${d.why}`]));
+  if (f.claimType === 'advance' && f.staffId) {
+    const list = advances(s, f.staffId);
+    const a = list.find(x => x.c.id === f.advId);
+    if (a) {
+      const own = edit && a.bills.find(b => b.id === edit.id);
+      const left = r2(a.left + (own ? billTotals(s, own).cash : 0) - cash);
+      out.push(left >= -0.009 ? ['ok', `หักจาก ${a.c.no || 'ใบเบิก'} แล้วเหลือ ${baht(left)}`] : ['warn', `ยอดบิลเกินเงินที่เหลือใน ${a.c.no || 'ใบเบิก'} ${baht(-left)} ส่วนเกินบริษัทต้องจ่ายคืนพนักงาน`]);
+    } else if (!list.some(x => x.left > 0.009)) out.push(['warn', 'ไม่มีใบเบิกสำรองจ่ายที่ยังเหลือเงิน ถ้าออกเงินเองไปก่อนให้เลือก "เบิกคืนสำรองจ่าย"']);
+  }
+  return out;
+}
+
+function Checks({ list }) {
+  if (!list.length) return null;
+  const icon = { ok: '✓', info: 'ℹ️', warn: '⚠️', bad: '⛔' };
+  return <ul className="chks">{list.map(([lv, t], i) => <li key={i} className={'chk ' + lv}><span aria-hidden="true">{icon[lv]}</span><span>{t}</span></li>)}</ul>;
+}
+
 function BillForm({ onClose, edit }) {
-  const { s, me, mut, notify } = useApp();
+  const { s, me, rs, mut, notify } = useApp();
   const own = !isOffice(me);
+  const remote = rs && rs.remote && rs.remote.token ? rs.remote : null;
   const staffOpts = own ? s.staff.filter(x => x.id === me.staffId) : s.staff;
   const active = s.projects.filter(p => p.status === 'active' || (edit && p.id === edit.projectId));
-  const [f, setF] = useState(() => edit ? billToForm(edit) : { claimType: 'advance', staffId: own ? (me.staffId || '') : s.staff[0] ? s.staff[0].id : '', projectId: active[0] ? active[0].id : '', date: todayISO(), vendor: '', vatOn: true, vat: '', whtPct: '0', photos: [], ai: false, aiTotal: 0, lines: [newLine()] });
+  const [f, setF] = useState(() => edit ? billToForm(edit) : {
+    claimType: 'advance', staffId: own ? (me.staffId || '') : s.staff[0] ? s.staff[0].id : '', projectId: active[0] ? active[0].id : '', date: todayISO(),
+    vendor: '', taxId: '', receiptNo: '', docType: '', vatOn: true, vat: '', whtPct: '0', photos: [], hashes: [], aiBlobs: [], ai: false, aiTotal: 0, aiNote: '',
+    advId: '', advAuto: true, dupAck: false, lines: [newLine()],
+  });
   const [errs, setErrs] = useState([]);
   const [ai, setAi] = useReceiptAI();
   const [aiState, setAiState] = useState({ busy: false, msg: '', tone: '' });
+  const [showForm, setShowForm] = useState(!!edit);
+  const [srvDups, setSrvDups] = useState([]);
+  const [sending, setSending] = useState(false);
   const set = (k, v) => setF(p => ({ ...p, [k]: v }));
   const setLine = (id, k, v) => setF(p => ({ ...p, lines: p.lines.map(l => l.id === id ? { ...l, [k]: v } : l) }));
   const net = r2(sum(f.lines, l => l.amount));
   const vat = f.vatOn ? (f.vat !== '' ? r2(f.vat) : r2(net * 0.07)) : 0;
   const wht = r2(net * (+f.whtPct) / 100);
   const cash = r2(net + vat - wht);
+  const gross = r2(net + vat);
   const bal = f.staffId ? staffBalance(s, f.staffId) : 0;
+  const advList = f.claimType === 'advance' && f.staffId ? advances(s, f.staffId) : [];
+
+  // บิลซ้ำ: ตรวจจากข้อมูลในเครื่อง + ถามเซิร์ฟเวอร์ (พนักงานทั่วไปมองไม่เห็นบิลของคนอื่น)
+  const dupKey = { id: edit ? edit.id : '', taxId: cleanTaxId(f.taxId), receiptNo: f.receiptNo.trim(), vendor: f.vendor.trim(), date: f.date, total: gross, photoHashes: f.hashes };
+  const dupSig = JSON.stringify(dupKey);
+  const localDups = (f.vendor.trim() || f.hashes.length) ? findDupBills(s, dupKey) : [];
+  useEffect(() => {
+    if (!remote || !(f.vendor.trim() || f.hashes.length)) { setSrvDups([]); return; }
+    let alive = true;
+    const t = setTimeout(() => callSheet(remote.url, 'dupCheck', { token: remote.token, bill: dupKey })
+      .then(r => { if (alive) setSrvDups(r.dups || []); }).catch(() => {}), 900);
+    return () => { alive = false; clearTimeout(t); };
+  }, [dupSig, remote && remote.token]);
+  const dups = [...localDups, ...srvDups.filter(d => !localDups.some(x => x.id === d.id))];
+
+  // เลือกใบเบิกที่บิลนี้เคลียร์ให้อัตโนมัติ จนกว่าผู้ใช้จะเลือกเอง
+  const catsSig = f.lines.map(l => l.cat).join();
+  useEffect(() => {
+    if (f.claimType !== 'advance' || !f.advAuto) return;
+    const id = suggestAdv(s, { id: edit && edit.id, staffId: f.staffId, projectId: f.projectId, date: f.date, lines: f.lines, amount: cash });
+    if (id !== f.advId) setF(p => ({ ...p, advId: id }));
+  }, [f.claimType, f.advAuto, f.staffId, f.projectId, f.date, catsSig, cash, s.cash.length]);
+
+  const checks = billChecks(s, f, { gross, cash, dups, edit });
+  const blocking = checks.filter(c => c[0] === 'bad' && !(f.dupAck && /บิลซ้ำ/.test(c[1])));
 
   const onPhoto = async e => {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
+    const files = [...(e.target.files || [])];
+    e.target.value = '';
+    if (!files.length) return;
     try {
-      const newPhotos = [];
-      for (let file of files) {
-        const p = await readPhoto(file);
-        newPhotos.push(p.url);
-      }
-      e.target.value = '';
-      const photos = [...f.photos, ...newPhotos];
-      setF(x => ({ ...x, photos }));
+      const got = [];
+      for (const file of files) got.push(await prepReceipt(file));
+      const photos = [...f.photos, ...got.map(g => g.url)];
+      const hashes = [...f.hashes, ...got.map(g => g.hash)];
+      const aiBlobs = [...f.aiBlobs, ...got.map(g => g.aiBlob)];
+      setF(x => ({ ...x, photos, hashes, aiBlobs, dupAck: false }));
       setAiState({ busy: false, msg: '', tone: '' });
       // ถ่ายรูปแล้วให้ AI อ่านต่อทันที ไม่ต้องกดปุ่มเพิ่ม
-      if (ai) readReceipt(photos);
+      if (ai) readReceipt(photos, aiBlobs);
     } catch (err) { notify('อ่านรูปไม่สำเร็จ ลองเลือกไฟล์ภาพ JPG หรือ PNG', 'bad'); }
   };
+  const removePhoto = idx => setF(x => ({ ...x, photos: x.photos.filter((_, i) => i !== idx), hashes: x.hashes.filter((_, i) => i !== idx), aiBlobs: x.aiBlobs.filter((_, i) => i !== idx) }));
 
-  const removePhoto = (idx) => setF(x => ({ ...x, photos: x.photos.filter((_, i) => i !== idx) }));
-
-  const readReceipt = async (photos = f.photos) => {
+  const readReceipt = async (photos = f.photos, blobs = f.aiBlobs) => {
     if (!ai || photos.length === 0 || aiState.busy) return;
     setAiState({ busy: true, msg: `AI กำลังอ่านใบเสร็จ ${photos.length} ใบ…`, tone: '' });
-    const cats = CATS.map(c => `${c.key} = ${c.label}`).join('; ');
-    const prompt = `รูปที่แนบคือใบเสร็จ บิลเงินสด หรือใบกำกับภาษีจากร้านค้าในประเทศไทย ของบริษัทรับเหมาก่อสร้าง
-อ่านแล้วตอบเป็น JSON อย่างเดียว ตามรูปแบบนี้:
-{"date":"YYYY-MM-DD","vendor":"ชื่อร้าน","vat":0,"total":0,"items":[{"descr":"รายการ","amount":0,"category":"mat"}],"note":"สิ่งที่อ่านไม่ชัดหรือควรตรวจ"}
-กติกา:
-- date เป็นปี ค.ศ. ถ้าใบเสร็จเป็นปี พ.ศ. ให้ลบ 543
-- amount คือยอดก่อน VAT ของแต่ละรายการ ถ้าใบเสร็จแสดงราคารวม VAT ให้ถอด VAT ออกตามสัดส่วน ผลรวม amount ต้องเท่ากับยอดก่อน VAT ของทั้งใบ
-- vat คือภาษีมูลค่าเพิ่มทั้งใบ ถ้าไม่มีให้เป็น 0
-- total คือยอดรวมสุทธิที่ต้องจ่ายทั้งใบ (รวม VAT แล้ว) ตามที่พิมพ์ในใบเสร็จ
-- รวมรายการเล็กที่ประเภทเดียวกันได้ ไม่เกิน 6 รายการ
-- category เลือกจาก: ${cats}
-- ช่องที่อ่านไม่ได้ให้เป็น null`;
+    const prompt = receiptPrompt();
     try {
-      const allItems = [];
-      let totalVat = 0;
-      let grand = 0;
-      let lastVendor = '';
-      let lastDate = '';
-      let lastNote = '';
-
-      for (const photoUrl of photos) {
-        const blob = await fetch(photoUrl).then(r => r.blob());
-        const r = await ai.json(prompt, { images: blob });
-        const items = Array.isArray(r && r.items) ? r.items.filter(i => i && +i.amount > 0) : [];
-        allItems.push(...items);
-        if (r && r.vendor && !lastVendor) lastVendor = r.vendor;
-        if (r && r.date && !lastDate) lastDate = r.date;
-        if (r && r.vat) totalVat += +r.vat;
-        if (r && +r.total > 0) grand += +r.total;
-        if (r && r.note && !lastNote) lastNote = r.note;
+      const items = [], notes = [];
+      let totalVat = 0, grand = 0;
+      const first = {};
+      for (let i = 0; i < photos.length; i++) {
+        const blob = blobs[i] || await fetch(photos[i]).then(r => r.blob());
+        const r = await ai.json(prompt, { images: blob }) || {};
+        items.push(...(Array.isArray(r.items) ? r.items.filter(x => x && +x.amount > 0) : []));
+        ['vendor', 'date', 'taxId', 'receiptNo', 'docType'].forEach(k => { if (r[k] && !first[k]) first[k] = String(r[k]); });
+        if (+r.vat) totalVat += +r.vat;
+        if (+r.total > 0) grand += +r.total;
+        if (r.note) notes.push(String(r.note));
       }
-
+      const tid = cleanTaxId(first.taxId);
       setF(p => ({
-        ...p, ai: true, aiTotal: r2(grand),
-        date: /^\d{4}-\d{2}-\d{2}$/.test(lastDate) && lastDate <= todayISO() ? lastDate : p.date,
-        vendor: lastVendor ? String(lastVendor).slice(0, 80) : p.vendor,
-        vatOn: totalVat > 0,
-        vat: totalVat > 0 ? String(r2(totalVat)) : '',
-        lines: allItems.length ? allItems.slice(0, 12).map(i => ({ ...newLine(CAT[i.category] ? i.category : 'misc'), descr: String(i.descr || '').slice(0, 80), amount: String(r2(i.amount)) })) : p.lines,
+        ...p, ai: true, aiTotal: r2(grand), aiNote: notes.join(' · ').slice(0, 200),
+        date: /^\d{4}-\d{2}-\d{2}$/.test(first.date || '') && first.date <= todayISO() ? first.date : p.date,
+        vendor: first.vendor ? first.vendor.slice(0, 80) : p.vendor,
+        taxId: tid.length === 13 ? tid : p.taxId,
+        receiptNo: first.receiptNo ? first.receiptNo.slice(0, 40) : p.receiptNo,
+        docType: DOC_TYPE[first.docType] ? first.docType : p.docType,
+        vatOn: totalVat > 0, vat: totalVat > 0 ? String(r2(totalVat)) : '',
+        lines: items.length ? items.slice(0, 12).map(x => ({ ...newLine(CAT[x.category] ? x.category : 'misc'), descr: String(x.descr || '').slice(0, 80), amount: String(r2(x.amount)) })) : p.lines,
+        dupAck: false,
       }));
-      setAiState({ busy: false, tone: 'ok', msg: `✓ อ่านรูป ${photos.length} ใบแล้ว พบรายการ ${allItems.length} รายการ ตรวจและแก้ไขได้ทุกช่องก่อนส่ง${lastNote ? ' · ⚠️ ' + String(lastNote).slice(0, 120) : ''}` });
+      setAiState({ busy: false, tone: 'ok', msg: items.length ? '' : 'AI ไม่พบรายการสินค้าในรูป กรอกรายการเองในฟอร์ม' });
+      if (!items.length) setShowForm(true);
     } catch (e) {
-      const code = e && e.code;
-      if (code === 'not_granted' || code === 'capability_disabled' || code === 'capability_removed' || code === 'unavailable') setAi(null);
-      setAiState({ busy: false, tone: 'bad', msg:
-        code === 'not_granted' ? 'ไม่ได้อนุญาตให้ใช้ AI อ่านใบเสร็จ กรอกข้อมูลเองได้ตามปกติ'
-        : code === 'rate_limited' ? 'ใช้งาน AI ถี่เกินไป รอสักครู่แล้วลองใหม่'
-        : code === 'invalid_json' ? 'AI อ่านใบเสร็จนี้ไม่ออก ลองถ่ายให้ตรงและชัดขึ้น หรือกรอกเอง'
-        : 'อ่านใบเสร็จไม่สำเร็จ กรอกข้อมูลเองได้ตามปกติ' });
+      if (AI_OFF.includes(e && e.code)) setAi(null);
+      setAiState({ busy: false, tone: 'bad', msg: aiErrorText(e) });
+      setShowForm(true);
     }
   };
 
-  const submit = () => {
+  const submit = async () => {
     const e = [];
     if (!f.staffId) e.push('เลือกพนักงานที่เบิก');
     if (!f.projectId) e.push('เลือกโครงการ');
@@ -2333,11 +2778,26 @@ function BillForm({ onClose, edit }) {
       if (l.cat === 'stock' && (!l.itemId || !(+l.qty > 0))) e.push(`บรรทัดที่ ${i + 1}: เลือกสินค้าและจำนวนที่ซื้อเข้าสต๊อก`);
     });
     if (!edit && f.photos.length === 0) e.push('แนบรูปใบเสร็จหรือบิลเงินสด อย่างน้อย 1 ใบ');
+    if (dups.length && !f.dupAck) e.push('พบบิลที่อาจซ้ำ ตรวจแล้วติ๊ก "ยืนยันว่าไม่ใช่บิลซ้ำ" หรือยกเลิกบิลนี้');
+    if (f.date > todayISO()) e.push('วันที่ในใบเสร็จต้องไม่เกินวันนี้');
     setErrs(e);
-    if (e.length) return;
+    if (e.length) { setShowForm(true); return; }
+    // ตรวจซ้ำกับเซิร์ฟเวอร์อีกครั้งก่อนส่งจริง (กันกรณีกดเร็วก่อนผลตรวจกลับมา)
+    if (remote && !f.dupAck) {
+      setSending(true);
+      try {
+        const r = await callSheet(remote.url, 'dupCheck', { token: remote.token, bill: dupKey });
+        setSending(false);
+        if ((r.dups || []).length) { setSrvDups(r.dups); setErrs(['พบบิลที่อาจซ้ำ ตรวจแล้วติ๊ก "ยืนยันว่าไม่ใช่บิลซ้ำ" หรือยกเลิกบิลนี้']); setShowForm(true); return; }
+      } catch (err) { setSending(false); /* ตรวจไม่ได้ (ออฟไลน์) ส่งต่อได้ ผู้อนุมัติยังเห็นคำเตือนบิลซ้ำ */ }
+    }
+    const newId = edit ? edit.id : uid();
+    const adv = f.claimType === 'advance' ? f.advId : '';
     const ok = mut(d => {
       const fields = {
         claimType: f.claimType, staffId: f.staffId, projectId: f.projectId, date: f.date, vendor: f.vendor.trim(), vat, wht,
+        taxId: cleanTaxId(f.taxId), receiptNo: f.receiptNo.trim(), docType: f.docType, advId: adv, aiTotal: f.ai ? f.aiTotal : 0,
+        photoHashes: f.hashes, dupNote: dups.length && f.dupAck ? `ผู้ส่งยืนยันว่าไม่ซ้ำกับ ${dups.map(x => x.no).filter(Boolean).join(', ')}` : '',
         weekStart: f.claimType === 'advance' ? openWeekFor(d, f.staffId, weekOf(f.date)) : weekOf(f.date), photo: f.photos[0] || null, photos: f.photos, ai: f.ai,
         lines: lines.map(l => ({ id: l.id, kind: l.cat === 'stock' ? 'stock' : 'expense', cat: l.cat, descr: l.cat === 'stock' ? (d.items.find(i => i.id === l.itemId) || {}).name : l.descr.trim(), amount: r2(l.amount), itemId: l.cat === 'stock' ? l.itemId : '', qty: l.cat === 'stock' ? +l.qty : '' })),
       };
@@ -2348,103 +2808,139 @@ function BillForm({ onClose, edit }) {
         submitBill(d, x);  // แก้แล้วเริ่มสายอนุมัติใหม่
         return;
       }
-      const b = { id: uid(), ...fields };
+      const b = { id: newId, ...fields };
       d.bills.push(b);
       submitBill(d, b);
     }, edit ? `บันทึกการแก้ไข ${edit.no} แล้ว ส่งกลับเข้าสายอนุมัติ` : `ส่งอนุมัติแล้ว แจ้งเตือนไปที่${ROLE_SHORT[chainFor(s, cash)[0]]}`);
-    if (ok) onClose();
+    if (ok) onClose(newId);
   };
+
+  const summary = f.ai && !aiState.busy && f.photos.length > 0;
+  const catNames = [...new Set(f.lines.filter(l => +l.amount > 0).map(l => l.cat === 'stock' ? 'ซื้อเข้าสต๊อก' : (CAT[l.cat] || CAT.misc).label))];
 
   return (
     <section className="panel formpanel">
-      <div className="panel-head"><h2>{edit ? `แก้ไข ${edit.no} · ${edit.vendor}` : 'เคลียร์สำรองจ่าย'}</h2><button className="btn btn-sm btn-ghost" onClick={onClose}>ปิด</button></div>
+      <div className="panel-head"><h2>{edit ? `แก้ไข ${edit.no} · ${edit.vendor}` : 'เคลียร์สำรองจ่าย'}</h2><button className="btn btn-sm btn-ghost" onClick={() => onClose()}>ปิด</button></div>
       {edit && <p className="hint" style={{ marginBottom: 12 }}>แก้ไขได้จนกว่าจะอนุมัติครบ · บันทึกแล้วบิลจะกลับไปเริ่มสายอนุมัติใหม่{edit.rejectNote ? ` · เหตุที่ตีกลับ: ${edit.rejectNote}` : ''}</p>}
-      <div className="seg" role="radiogroup" aria-label="ประเภทเรื่อง" style={{ marginBottom: 14 }}>
+      <div className="seg" role="radiogroup" aria-label="ประเภทเรื่อง" style={{ marginBottom: 10 }}>
         {Object.entries(CLAIM).map(([k, v]) => <button key={k} role="radio" aria-checked={f.claimType === k} aria-selected={f.claimType === k} onClick={() => set('claimType', k)}>{v}</button>)}
       </div>
       <p className="hint" style={{ marginBottom: 12 }}>{f.claimType === 'advance'
         ? `หักจากสำรองจ่ายที่ถืออยู่ ยอดคงค้างตอนนี้ ${baht(bal)}`
         : 'พนักงานออกเงินเองไปก่อน อนุมัติแล้วฝ่ายบัญชีจะโอนหรือจ่ายเงินสดคืน'}</p>
 
-      <div className="photo-row">
-        <label className="field"><span>📷 ถ่ายรูปใบเสร็จ / บิลเงินสด (รูปละ 1 ใบเสร็จ)</span><input id="bf-photo" type="file" accept="image/*" capture="environment" multiple onChange={onPhoto} /></label>
-        {f.photos.length > 0 && <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', gap: 8, marginTop: 8 }}>
-          {f.photos.map((p, i) => <div key={i} style={{ position: 'relative', width: '100%', paddingBottom: '100%', backgroundColor: '#f0f0f0', borderRadius: 4, overflow: 'hidden' }}>
-            <img src={p} alt={`รูปที่ ${i + 1}`} style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', objectFit: 'cover' }} />
-            <button className="btn btn-sm iconbtn" style={{ position: 'absolute', top: 4, right: 4, padding: 4, borderRadius: '50%' }} onClick={() => removePhoto(i)}>✕</button>
-          </div>)}
-        </div>}
-        {f.photos.length > 0 && ai && <div className="aibox" style={{ marginTop: 12 }}>
-          <button className="btn btn-primary" disabled={aiState.busy} onClick={() => readReceipt()}>{aiState.busy ? 'กำลังอ่าน…' : f.ai ? `ให้ AI อ่านใหม่ (${f.photos.length} ใบ)` : `ให้ AI อ่านรูป ${f.photos.length} ใบ`}</button>
-          <span className="hint">ถ่ายรูปแล้ว AI จะอ่านให้อัตโนมัติ ดึงวันที่ ร้านค้า รายการ และยอดเงินมาเติมในฟอร์มด้านล่าง แก้ไขได้ทุกช่อง</span>
-        </div>}
-        {f.photos.length > 0 && !ai && <p className="hint" style={{ alignSelf: 'center', marginTop: 12 }}>💡 AI อ่านใบเสร็จใช้ได้เมื่อเปิดแอปผ่านลิงก์ claude.ai ตอนนี้กรอกข้อมูลเองได้ตามปกติ</p>}
-      </div>
-      {aiState.msg && <p className={'hint ' + (aiState.tone === 'bad' ? 'bad' : '')} style={{ margin: '8px 0 0', color: aiState.tone === 'ok' ? 'var(--ok)' : undefined }} role="status">{aiState.msg}</p>}
+      {/* ขั้นที่ 1 ถ่ายรูป */}
+      <label className={'shoot' + (f.photos.length ? ' small' : '')}>
+        <span aria-hidden="true">📷</span>
+        <span><b>{f.photos.length ? 'ถ่าย / เพิ่มรูปใบเสร็จ' : 'ถ่ายรูปใบเสร็จ'}</b><small>{ai ? 'AI อ่านวันที่ ร้าน เลขผู้เสียภาษี หมวด และยอดเงินให้อัตโนมัติ' : 'รูปละ 1 ใบเสร็จ เลือกได้หลายรูป'}</small></span>
+        <input id="bf-photo" type="file" accept="image/*" capture="environment" multiple hidden onChange={onPhoto} />
+      </label>
+      {f.photos.length > 0 && <div className="shots">
+        {f.photos.map((p, i) => <div key={i} className="shot">
+          <img src={p} alt={`รูปใบเสร็จที่ ${i + 1}`} />
+          <button className="btn btn-sm iconbtn" aria-label={`ลบรูปที่ ${i + 1}`} onClick={() => removePhoto(i)}>✕</button>
+        </div>)}
+      </div>}
+      {f.photos.length > 0 && !ai && <p className="hint" style={{ marginTop: 8 }}>💡 AI อ่านใบเสร็จยังไม่พร้อม{remote ? ' (Staff office ตั้งค่าได้ที่ชีต → เมนู SUBAN CC → ตั้งค่า AI อ่านใบเสร็จ)' : ''} กรอกข้อมูลเองได้ตามปกติ</p>}
+      {aiState.busy && <p className="hint aibusy" role="status">⏳ {aiState.msg}</p>}
+      {!aiState.busy && aiState.msg && <p className={'hint ' + (aiState.tone === 'bad' ? 'bad' : '')} style={{ marginTop: 8 }} role="status">{aiState.msg}</p>}
 
-      <div className="form" style={{ marginTop: 14 }}>
-        <label className="field"><span>พนักงานที่เบิก</span>
-          <select id="bf-staff" value={f.staffId} disabled={own} onChange={e => set('staffId', e.target.value)}>{staffOpts.map(x => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label>
-        <label className="field"><span>โครงการ</span>
-          <select id="bf-proj" value={f.projectId} onChange={e => set('projectId', e.target.value)}>{active.map(p => <option key={p.id} value={p.id}>{p.code} {p.name}</option>)}</select></label>
-        <label className="field"><span>วันที่ในใบเสร็จ</span><input id="bf-date" type="date" value={f.date} max={todayISO()} onChange={e => set('date', e.target.value)} /></label>
-        <label className="field"><span>ร้านค้า</span><input id="bf-vendor" placeholder="เช่น ไทวัสดุ บางนา" value={f.vendor} onChange={e => set('vendor', e.target.value)} /></label>
-      </div>
-
-      <h3 style={{ margin: '18px 0 8px' }}>รายการค่าใช้จ่าย</h3>
-      <div className="stack" style={{ gap: 8 }}>
-        <div className="lineed head"><span>ประเภทค่าใช้จ่าย</span><span>รายละเอียด / สินค้า</span><span>จำนวน</span><span className="r">ยอดก่อน VAT</span><span /></div>
-        {f.lines.map(l => {
-          const it = s.items.find(i => i.id === l.itemId);
-          return (
-            <div className="lineed" key={l.id}>
-              <select id={'lk-' + l.id} aria-label="ประเภทค่าใช้จ่าย" value={l.cat} onChange={e => setLine(l.id, 'cat', e.target.value)}>
-                {CATS.map(c => <option key={c.key} value={c.key}>{c.label}</option>)}
-                <option value="stock">ซื้อเข้าสต๊อก</option>
-              </select>
-              {l.cat !== 'stock'
-                ? <input id={'ld-' + l.id} className="span2" aria-label="รายละเอียด" placeholder="เช่น ค่าขนส่ง, น้ำมันรถกระบะ" value={l.descr} onChange={e => setLine(l.id, 'descr', e.target.value)} />
-                : <select id={'li-' + l.id} className="span2" aria-label="สินค้า" value={l.itemId} onChange={e => setLine(l.id, 'itemId', e.target.value)}>
-                    <option value="">เลือกสินค้า</option>{s.items.map(i => <option key={i.id} value={i.id}>{i.name}</option>)}
-                  </select>}
-              {l.cat === 'stock'
-                ? <input id={'lq-' + l.id} type="number" min="0" step="any" aria-label="จำนวน" placeholder={it ? it.unit : 'จำนวน'} value={l.qty} onChange={e => setLine(l.id, 'qty', e.target.value)} />
-                : <span className="hint">—</span>}
-              <input id={'la-' + l.id} type="number" min="0" step="0.01" aria-label="ยอดก่อน VAT" placeholder="0.00" className="r" value={l.amount} onChange={e => setLine(l.id, 'amount', e.target.value)} />
-              <button className="btn btn-ghost iconbtn" aria-label="ลบบรรทัด" disabled={f.lines.length === 1} onClick={() => setF(p => ({ ...p, lines: p.lines.filter(x => x.id !== l.id) }))}>✕</button>
-            </div>
-          );
-        })}
-        <div><button className="btn btn-sm" onClick={() => setF(p => ({ ...p, lines: [...p.lines, newLine('misc')] }))}>+ เพิ่มบรรทัด</button></div>
-      </div>
-      <p className="hint" style={{ marginTop: 8 }}>ซื้อเข้าสต๊อก = เก็บเข้าคลังก่อน จะเป็นต้นทุนโครงการตอนเบิกออก · ประเภทอื่นเป็นต้นทุนโครงการทันทีที่อนุมัติ</p>
-
-      <div className="formfoot">
-        <div className="row" style={{ gap: 16 }}>
-          <label className="check"><input id="bf-vaton" type="checkbox" checked={f.vatOn} onChange={e => set('vatOn', e.target.checked)} />มี VAT</label>
-          {f.vatOn && <label className="field" style={{ width: 120 }}><span>VAT (ว่าง = 7%)</span><input id="bf-vat" type="number" step="0.01" placeholder={num(net * 0.07)} value={f.vat} onChange={e => set('vat', e.target.value)} /></label>}
-          <label className="field" style={{ width: 150 }}><span>หัก ณ ที่จ่าย</span>
-            <select id="bf-wht" value={f.whtPct} onChange={e => set('whtPct', e.target.value)}><option value="0">ไม่หัก</option><option value="1">1% ค่าขนส่ง</option><option value="3">3% ค่าบริการ</option><option value="5">5% ค่าเช่า</option></select></label>
+      {/* ขั้นที่ 2 ตรวจผลที่ AI อ่าน แล้วยืนยันครั้งเดียว */}
+      {summary && (
+        <div className="aisum">
+          <div className="row between"><b>🤖 AI อ่านใบเสร็จแล้ว ตรวจความถูกต้อง</b>
+            {ai && <button className="btn btn-sm btn-ghost" onClick={() => readReceipt()}>อ่านใหม่</button>}</div>
+          <dl>
+            <dt>ร้าน</dt><dd>{f.vendor || '—'}</dd>
+            <dt>เลขผู้เสียภาษี</dt><dd className="num">{cleanTaxId(f.taxId) || '—'}</dd>
+            <dt>เลขที่ใบเสร็จ</dt><dd className="num">{f.receiptNo || '—'}{f.docType ? ` · ${DOC_TYPE[f.docType]}` : ''}</dd>
+            <dt>วันที่</dt><dd>{f.date ? thDate(f.date) : '—'}</dd>
+            <dt>หมวด</dt><dd>{catNames.join(', ') || '—'}</dd>
+            <dt>ยอดรวม</dt><dd className="num"><b>{baht(gross)}</b>{vat ? ` (VAT ${baht(vat)})` : ''}{wht ? ` · หัก ณ ที่จ่าย ${baht(wht)}` : ''}</dd>
+            {f.claimType === 'advance' && <><dt>เคลียร์ใบเบิก</dt><dd>{f.advId ? advLabel((advList.find(a => a.c.id === f.advId) || {}).c || {}) : 'ไม่ระบุ'}</dd></>}
+          </dl>
+          {f.aiNote && <p className="hint warn" style={{ marginBottom: 6 }}>AI แจ้ง: {f.aiNote}</p>}
+          <Checks list={checks} />
+          {dups.length > 0 && <label className="check" style={{ marginTop: 8 }}><input id="bf-dupok" type="checkbox" checked={f.dupAck} onChange={e => set('dupAck', e.target.checked)} />ยืนยันว่าไม่ใช่บิลซ้ำ (ผู้อนุมัติจะเห็นหมายเหตุนี้)</label>}
+          <div className="actions" style={{ marginTop: 12 }}>
+            <button className="btn btn-primary bigbtn" disabled={blocking.length > 0 || sending} onClick={submit}>{sending ? 'กำลังตรวจบิลซ้ำ…' : `✓ ข้อมูลถูกต้อง ส่งอนุมัติ ${baht(cash)}`}</button>
+            <button className="btn" onClick={() => setShowForm(v => !v)} aria-expanded={showForm}>{showForm ? 'ซ่อนรายละเอียด' : '✏️ แก้ไขรายละเอียด'}</button>
+          </div>
+          {blocking.length > 0 && <p className="hint bad" style={{ marginTop: 6 }}>แก้ข้อที่มีเครื่องหมาย ⛔ ก่อน จึงจะส่งได้</p>}
+          {errs.length > 0 && !showForm && <div className="errors" style={{ marginTop: 10 }}>{errs.map((e, i) => <div key={i}>{e}</div>)}</div>}
         </div>
-        <dl className="totals">
-          <dt>ยอดก่อน VAT</dt><dd>{baht(net)}</dd>
-          <dt>VAT</dt><dd>{baht(vat)}</dd>
-          {wht > 0 && <><dt>หัก ณ ที่จ่าย</dt><dd>{baht(-wht)}</dd></>}
-          <dt className="big">{f.claimType === 'advance' ? 'หักจากสำรองจ่าย' : 'ยอดที่ขอเบิกคืน'}</dt><dd className="big">{baht(cash)}</dd>
-        </dl>
-      </div>
-      {f.ai && f.aiTotal > 0 && Math.abs(r2(net + vat) - f.aiTotal) > 1 && (
-        <p className="hint warn" style={{ marginTop: 10 }} role="status">⚠️ ยอดรวมในใบเสร็จที่ AI อ่านได้ {baht(f.aiTotal)} ไม่ตรงกับยอดในฟอร์ม {baht(r2(net + vat))} ตรวจรายการหรือ VAT อีกครั้ง</p>
       )}
-      {f.ai && f.aiTotal > 0 && Math.abs(r2(net + vat) - f.aiTotal) <= 1 && (
-        <p className="hint" style={{ marginTop: 10, color: 'var(--ok)' }}>✓ ยอดรวมตรงกับใบเสร็จ {baht(f.aiTotal)}</p>
-      )}
-      <p className="hint" style={{ marginTop: 10 }}>สายอนุมัติของยอดนี้: {chainFor(s, cash).map(r => ROLE_SHORT[r]).join(' → ')}{f.claimType === 'reimburse' ? ' → ฝ่ายบัญชีจ่ายเงิน' : ''}</p>
-      {errs.length > 0 && <div className="errors" style={{ marginTop: 12 }}>{errs.map((e, i) => <div key={i}>{e}</div>)}</div>}
-      <div className="actions" style={{ justifyContent: 'flex-end', marginTop: 12 }}>
-        <button className="btn btn-ghost" onClick={onClose}>ยกเลิก</button>
-        <button className="btn btn-primary" onClick={submit}>{edit ? 'บันทึกการแก้ไขและส่งอนุมัติ' : 'ส่งอนุมัติ'}</button>
-      </div>
+
+      {/* รายละเอียดทั้งหมด แก้ไขได้ทุกช่อง */}
+      {(showForm || !summary) && (<>
+        <div className="form" style={{ marginTop: 14 }}>
+          <label className="field"><span>พนักงานที่เบิก</span>
+            <select id="bf-staff" value={f.staffId} disabled={own} onChange={e => set('staffId', e.target.value)}>{staffOpts.map(x => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label>
+          <label className="field"><span>โครงการ</span>
+            <select id="bf-proj" value={f.projectId} onChange={e => set('projectId', e.target.value)}>{active.map(p => <option key={p.id} value={p.id}>{p.code} {p.name}</option>)}</select></label>
+          <label className="field"><span>วันที่ในใบเสร็จ</span><input id="bf-date" type="date" value={f.date} max={todayISO()} onChange={e => set('date', e.target.value)} /></label>
+          <label className="field"><span>ร้านค้า</span><input id="bf-vendor" placeholder="เช่น ไทวัสดุ บางนา" value={f.vendor} onChange={e => set('vendor', e.target.value)} /></label>
+          <label className="field"><span>เลขผู้เสียภาษีของร้าน</span><input id="bf-tax" inputMode="numeric" placeholder="13 หลัก (ถ้ามี)" value={f.taxId} onChange={e => set('taxId', e.target.value)} /></label>
+          <label className="field"><span>เลขที่ใบเสร็จ</span><input id="bf-rno" placeholder="เช่น INV-00123" value={f.receiptNo} onChange={e => set('receiptNo', e.target.value)} /></label>
+          <label className="field"><span>ชนิดเอกสาร</span><select id="bf-doc" value={f.docType} onChange={e => set('docType', e.target.value)}><option value="">ไม่ระบุ</option>{Object.entries(DOC_TYPE).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></label>
+          {f.claimType === 'advance' && <label className="field"><span>เคลียร์ใบเบิก {f.advAuto && f.advId ? '(ระบบจับคู่ให้)' : ''}</span>
+            <select id="bf-adv" value={f.advId} onChange={e => setF(p => ({ ...p, advId: e.target.value, advAuto: false }))}>
+              <option value="">ไม่ระบุ</option>
+              {advList.filter(a => a.left > 0.009 || a.c.id === f.advId).map(a => <option key={a.c.id} value={a.c.id}>{advLabel(a.c)} · เหลือ {baht(a.left)}</option>)}
+            </select></label>}
+        </div>
+
+        <h3 style={{ margin: '18px 0 8px' }}>รายการค่าใช้จ่าย</h3>
+        <div className="stack" style={{ gap: 8 }}>
+          <div className="lineed head"><span>ประเภทค่าใช้จ่าย</span><span>รายละเอียด / สินค้า</span><span>จำนวน</span><span className="r">ยอดก่อน VAT</span><span /></div>
+          {f.lines.map(l => {
+            const it = s.items.find(i => i.id === l.itemId);
+            return (
+              <div className="lineed" key={l.id}>
+                <select id={'lk-' + l.id} aria-label="ประเภทค่าใช้จ่าย" value={l.cat} onChange={e => setLine(l.id, 'cat', e.target.value)}>
+                  {CATS.map(c => <option key={c.key} value={c.key}>{c.label}</option>)}
+                  <option value="stock">ซื้อเข้าสต๊อก</option>
+                </select>
+                {l.cat !== 'stock'
+                  ? <input id={'ld-' + l.id} className="span2" aria-label="รายละเอียด" placeholder="เช่น ค่าขนส่ง, น้ำมันรถกระบะ" value={l.descr} onChange={e => setLine(l.id, 'descr', e.target.value)} />
+                  : <select id={'li-' + l.id} className="span2" aria-label="สินค้า" value={l.itemId} onChange={e => setLine(l.id, 'itemId', e.target.value)}>
+                      <option value="">เลือกสินค้า</option>{s.items.map(i => <option key={i.id} value={i.id}>{i.name}</option>)}
+                    </select>}
+                {l.cat === 'stock'
+                  ? <input id={'lq-' + l.id} type="number" min="0" step="any" aria-label="จำนวน" placeholder={it ? it.unit : 'จำนวน'} value={l.qty} onChange={e => setLine(l.id, 'qty', e.target.value)} />
+                  : <span className="hint">—</span>}
+                <input id={'la-' + l.id} type="number" min="0" step="0.01" aria-label="ยอดก่อน VAT" placeholder="0.00" className="r" value={l.amount} onChange={e => setLine(l.id, 'amount', e.target.value)} />
+                <button className="btn btn-ghost iconbtn" aria-label="ลบบรรทัด" disabled={f.lines.length === 1} onClick={() => setF(p => ({ ...p, lines: p.lines.filter(x => x.id !== l.id) }))}>✕</button>
+              </div>
+            );
+          })}
+          <div><button className="btn btn-sm" onClick={() => setF(p => ({ ...p, lines: [...p.lines, newLine('misc')] }))}>+ เพิ่มบรรทัด</button></div>
+        </div>
+        <p className="hint" style={{ marginTop: 8 }}>ซื้อเข้าสต๊อก = เก็บเข้าคลังก่อน จะเป็นต้นทุนโครงการตอนเบิกออก · ประเภทอื่นเป็นต้นทุนโครงการทันทีที่อนุมัติ</p>
+
+        <div className="formfoot">
+          <div className="row" style={{ gap: 16 }}>
+            <label className="check"><input id="bf-vaton" type="checkbox" checked={f.vatOn} onChange={e => set('vatOn', e.target.checked)} />มี VAT</label>
+            {f.vatOn && <label className="field" style={{ width: 120 }}><span>VAT (ว่าง = 7%)</span><input id="bf-vat" type="number" step="0.01" placeholder={num(net * 0.07)} value={f.vat} onChange={e => set('vat', e.target.value)} /></label>}
+            <label className="field" style={{ width: 150 }}><span>หัก ณ ที่จ่าย</span>
+              <select id="bf-wht" value={f.whtPct} onChange={e => set('whtPct', e.target.value)}><option value="0">ไม่หัก</option><option value="1">1% ค่าขนส่ง</option><option value="3">3% ค่าบริการ</option><option value="5">5% ค่าเช่า</option></select></label>
+          </div>
+          <dl className="totals">
+            <dt>ยอดก่อน VAT</dt><dd>{baht(net)}</dd>
+            <dt>VAT</dt><dd>{baht(vat)}</dd>
+            {wht > 0 && <><dt>หัก ณ ที่จ่าย</dt><dd>{baht(-wht)}</dd></>}
+            <dt className="big">{f.claimType === 'advance' ? 'หักจากสำรองจ่าย' : 'ยอดที่ขอเบิกคืน'}</dt><dd className="big">{baht(cash)}</dd>
+          </dl>
+        </div>
+        {!summary && <div style={{ marginTop: 10 }}><Checks list={checks} /></div>}
+        {!summary && dups.length > 0 && <label className="check" style={{ marginTop: 8 }}><input id="bf-dupok2" type="checkbox" checked={f.dupAck} onChange={e => set('dupAck', e.target.checked)} />ยืนยันว่าไม่ใช่บิลซ้ำ (ผู้อนุมัติจะเห็นหมายเหตุนี้)</label>}
+        <p className="hint" style={{ marginTop: 10 }}>สายอนุมัติของยอดนี้: {chainFor(s, cash).map(r => ROLE_SHORT[r]).join(' → ')}{f.claimType === 'reimburse' ? ' → ฝ่ายบัญชีจ่ายเงิน' : ''}</p>
+        {errs.length > 0 && <div className="errors" style={{ marginTop: 12 }}>{errs.map((e, i) => <div key={i}>{e}</div>)}</div>}
+        <div className="actions" style={{ justifyContent: 'flex-end', marginTop: 12 }}>
+          <button className="btn btn-ghost" onClick={() => onClose()}>ยกเลิก</button>
+          <button className="btn btn-primary" disabled={sending} onClick={submit}>{sending ? 'กำลังตรวจบิลซ้ำ…' : edit ? 'บันทึกการแก้ไขและส่งอนุมัติ' : 'ส่งอนุมัติ'}</button>
+        </div>
+      </>)}
     </section>
   );
 }
@@ -4141,8 +4637,8 @@ function PunchCardImport({ workerId: presetId, defDate, onClose }) {
       setAiState({ busy: false, tone: 'ok', msg: `✓ อ่านได้ ${out.length} วัน${unclear ? ` · ⚠️ ไม่ชัด ${unclear} วัน (แถวสีเหลือง) ตรวจกับรูปแล้วแก้ได้เลย` : ''} ตรวจทุกช่องก่อนบันทึก` });
     } catch (e) {
       const code = e && e.code;
-      if (code === 'not_granted' || code === 'capability_disabled' || code === 'capability_removed' || code === 'unavailable') setAi(null);
-      setAiState({ busy: false, tone: 'bad', msg: code === 'not_granted' ? 'ไม่ได้อนุญาตให้ใช้ AI กรอกเองได้' : code === 'rate_limited' ? 'ใช้ AI ถี่เกินไป รอแล้วลองใหม่' : 'AI อ่านบัตรตอกไม่สำเร็จ ลองถ่ายใหม่หรือกรอกเอง' });
+      if (AI_OFF.includes(code)) setAi(null);
+      setAiState({ busy: false, tone: 'bad', msg: aiErrorText(e, 'บัตรตอก') });
     }
   };
 
@@ -4208,7 +4704,7 @@ function PunchCardImport({ workerId: presetId, defDate, onClose }) {
         <button className="btn btn-primary" disabled={aiState.busy} onClick={readCard}>{aiState.busy ? 'กำลังอ่าน…' : `🤖 ให้ AI อ่านบัตรตอก ${meta.photos.length} รูป`}</button>
         <span className="hint">ถอดวันที่ เวลาเข้า-ออก ทุกวันบนบัตร วางบัตรบนพื้นเรียบ ถ่ายตรง ๆ ให้เห็นตัวเลขชัด</span>
       </div>}
-      {meta.photos.length > 0 && !ai && <p className="hint" style={{ marginBottom: 10 }}>💡 AI อ่านบัตรใช้ได้เมื่อเปิดแอปผ่าน claude.ai ตอนนี้กด "+ เพิ่มวัน" แล้วกรอกเองได้ (รูปจะเก็บเป็นหลักฐาน)</p>}
+      {meta.photos.length > 0 && !ai && <p className="hint" style={{ marginBottom: 10 }}>💡 AI อ่านบัตรยังไม่พร้อม (ต้องเชื่อม Google Sheets และตั้งค่า AI ในชีต) ตอนนี้กด "+ เพิ่มวัน" แล้วกรอกเองได้ (รูปจะเก็บเป็นหลักฐาน)</p>}
       {aiState.msg && <p className={'hint ' + (aiState.tone === 'bad' ? 'bad' : '')} style={{ margin: '4px 0 10px', color: aiState.tone === 'ok' ? 'var(--ok)' : undefined }} role="status">{aiState.msg}</p>}
       {cardName && <div className="subbox" style={{ marginBottom: 10 }}>
         <span className="small">ชื่อบนบัตร: <b>{cardName}</b> {w ? <>→ จับคู่กับ <b>{w.name}</b> (เปลี่ยนได้ที่ช่องคนงาน)</> : <span style={{ color: 'var(--bad)' }}>ไม่พบในทะเบียน</span>}</span>
@@ -4342,10 +4838,8 @@ function TimesheetImport({ defDate, onClose }) {
       }
     } catch (e) {
       const code = e && e.code;
-      setAiState({ busy: false, tone: 'bad', msg:
-        code === 'not_granted' ? 'ไม่ได้อนุญาตให้ใช้ AI อ่านบิล พิมพ์เองได้'
-        : code === 'rate_limited' ? 'ใช้ AI ถี่เกินไป รอแล้วลองใหม่'
-        : 'ไม่สามารถอ่านบิลบัตรตอกได้' });
+      if (AI_OFF.includes(code)) setAi(null);
+      setAiState({ busy: false, tone: 'bad', msg: aiErrorText(e, 'บัตรตอก') });
     }
   };
 
@@ -4396,7 +4890,7 @@ function TimesheetImport({ defDate, onClose }) {
         <button className="btn btn-primary" disabled={aiState.busy} onClick={readTimecard}>{aiState.busy ? 'กำลังอ่าน…' : `ให้ AI อ่านรูป ${meta.photos.length} ใบ`}</button>
         <span className="hint">ถอดชื่อ เวลาเข้า-ออก อัตโนมัติ จากบัตรตอก ถ่ายให้ตรงและชัดขึ้น</span>
       </div>}
-      {meta.photos.length > 0 && !ai && <p className="hint" style={{ marginBottom: 12 }}>💡 AI อ่านบิลใช้ได้เมื่อเปิดแอปผ่าน claude.ai ตอนนี้พิมพ์เองได้</p>}
+      {meta.photos.length > 0 && !ai && <p className="hint" style={{ marginBottom: 12 }}>💡 AI อ่านบัตรยังไม่พร้อม (ต้องเชื่อม Google Sheets และตั้งค่า AI ในชีต) ตอนนี้พิมพ์เองได้</p>}
       {aiState.msg && <p className={'hint ' + (aiState.tone === 'bad' ? 'bad' : '')} style={{ margin: '8px 0 12px', color: aiState.tone === 'ok' ? 'var(--ok)' : undefined }} role="status">{aiState.msg}</p>}
 
       <div className="cols" style={{ marginTop: 14, gridTemplateColumns: '1fr' }}>
@@ -4827,7 +5321,9 @@ function SetupView() {
   const [pj, setPj] = useState({ code: '', name: '', client: '', budget: '', openingCost: '' });
   const [wk, setWk] = useState({ name: '', team: '', daily: '', from: T });
   const [rt, setRt] = useState({ workerId: '', daily: '', from: T });
-  const [st, setSt] = useState({ name: '', position: '' });
+  const [st, setSt] = useState({ name: '', position: '', dept: '' });
+  const [dp, setDp] = useState({ staffId: '', dept: '' });
+  const depts = [...new Set([...DEPTS, ...s.staff.map(x => x.dept).filter(Boolean)])];
   const fileRef = useRef(null);
 
   const addProject = () => mut(d => {
@@ -4855,8 +5351,13 @@ function SetupView() {
   };
   const addStaff = () => mut(d => {
     if (!st.name.trim()) return 'กรอกชื่อพนักงาน';
-    d.staff.push({ id: uid(), name: st.name.trim(), position: st.position.trim() });
-  }, 'เพิ่มพนักงานแล้ว') && setSt({ name: '', position: '' });
+    d.staff.push({ id: uid(), name: st.name.trim(), position: st.position.trim(), dept: st.dept.trim() });
+  }, 'เพิ่มพนักงานแล้ว') && setSt({ name: '', position: '', dept: '' });
+  const setDept = () => mut(d => {
+    const x = d.staff.find(y => y.id === dp.staffId);
+    if (!x) return 'เลือกพนักงาน';
+    x.dept = dp.dept.trim();
+  }, 'บันทึกแผนกแล้ว') && setDp({ staffId: '', dept: '' });
 
   const exportJSON = async () => {
     const text = JSON.stringify(s);
@@ -4966,7 +5467,7 @@ function SetupView() {
         <div className="chips" style={{ marginBottom: 12 }}>{s.staff.map(x => {
           const used = s.bills.some(b => b.staffId === x.id) || s.cash.some(c => c.staffId === x.id);
           const acct = ua.list.find(u => u.staffId === x.id);
-          return (<span className="chip" key={x.id}>{x.name}{x.position ? ` · ${x.position}` : ''}{acct ? ` · @${acct.username}` : ''}
+          return (<span className="chip" key={x.id}>{x.name}{x.position ? ` · ${x.position}` : ''}{x.dept ? ` · แผนก${x.dept}` : ''}{acct ? ` · @${acct.username}` : ''}
             {can && <button className="linkbtn" style={{ marginLeft: 6 }} aria-label={`ลบ ${x.name}`} title={used ? 'มีบิลหรือเงินทดรองอยู่ ลบไม่ได้ ระงับบัญชีผู้ใช้แทน' : cloud && acct ? `ผูกกับบัญชี @${acct.username} อยู่ ยกเลิกการผูกที่ตารางผู้ใช้ก่อน` : 'ลบชื่อนี้'} disabled={used || (cloud && !!acct)}
               onClick={() => ask({ title: `ลบ ${x.name} ออกจากรายชื่อผู้เบิก?`, body: acct ? `บัญชี @${acct.username} จะถูกยกเลิกการผูกด้วย` : 'ยังไม่มีบิลหรือเงินทดรองของชื่อนี้', ok: 'ลบ', danger: true,
                 onOk: () => mut(d => { d.staff = d.staff.filter(y => y.id !== x.id); (d.users || []).forEach(u => { if (u.staffId === x.id) u.staffId = ''; }); Object.keys(d.lineMap || {}).forEach(k => { if (d.lineMap[k] === x.id) delete d.lineMap[k]; }); }, `ลบ ${x.name} แล้ว`) })}>ลบ</button>}
@@ -4982,8 +5483,19 @@ function SetupView() {
         {can && <div className="form">
           <label className="field"><span>ชื่อ</span><input id="st-n" value={st.name} onChange={e => setSt({ ...st, name: e.target.value })} /></label>
           <label className="field"><span>ตำแหน่ง</span><input id="st-p" value={st.position} onChange={e => setSt({ ...st, position: e.target.value })} /></label>
+          <label className="field"><span>แผนก</span><input id="st-d" list="dept-list" placeholder="เช่น หน้างาน, จัดซื้อ" value={st.dept} onChange={e => setSt({ ...st, dept: e.target.value })} /></label>
           <div className="field" style={{ justifyContent: 'flex-end' }}><button className="btn btn-primary" onClick={addStaff}>เพิ่ม</button></div>
         </div>}
+        {can && s.staff.length > 0 && <>
+          <h3 style={{ margin: '16px 0 6px' }}>กำหนดแผนก <span className="hint">ใช้แยกรายงานค่าใช้จ่ายตามแผนก</span></h3>
+          <div className="form">
+            <label className="field"><span>พนักงาน</span><select id="dp-s" value={dp.staffId} onChange={e => { const x = s.staff.find(y => y.id === e.target.value); setDp({ staffId: e.target.value, dept: (x && x.dept) || '' }); }}>
+              <option value="">เลือกพนักงาน</option>{s.staff.map(x => <option key={x.id} value={x.id}>{x.name}{x.dept ? ` (${x.dept})` : ''}</option>)}</select></label>
+            <label className="field"><span>แผนก</span><input id="dp-d" list="dept-list" value={dp.dept} onChange={e => setDp({ ...dp, dept: e.target.value })} /></label>
+            <div className="field" style={{ justifyContent: 'flex-end' }}><button className="btn" disabled={!dp.staffId} onClick={setDept}>บันทึกแผนก</button></div>
+          </div>
+        </>}
+        <datalist id="dept-list">{depts.map(x => <option key={x} value={x} />)}</datalist>
       </section>
     </div>
 

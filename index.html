@@ -2587,14 +2587,18 @@ const sheetAI = remote => ({
     const body = { prompt, image: await blobToB64(blob), mime: blob.type || 'image/jpeg' };
     let t = await aiTicket(remote).catch(() => null);
     if (t && t.url) {
+      // ticket/ตั้งค่าบน Worker ไม่ครบ หรือ Worker ติดต่อไม่ได้ → ใช้ทาง Apps Script แทน
+      // AI ตอบว่าอ่านไม่ได้/ไม่ว่าง → แจ้งเลย ทาง Apps Script ก็ใช้ Gemini เดียวกัน
+      const workerOff = e => !e.code || e.code === 'ticket' || e.code === 'ai_config';
       try {
         return (await workerAI(t, body)).json;
       } catch (e) {
+        if (!workerOff(e)) throw e;
         if (e.code === 'ticket') {
           t = await aiTicket(remote, true).catch(() => null);
-          if (t && t.url) return (await workerAI(t, body)).json;
-        } else if (e.code) throw e;   // AI ตอบว่าอ่านไม่ได้/ไม่ว่าง: ทาง Apps Script ก็ใช้ Gemini เดียวกัน ไม่ต้องลองซ้ำ
-        // Worker ติดต่อไม่ได้: ใช้ทาง Apps Script แทน
+          try { if (t && t.url) return (await workerAI(t, body)).json; }
+          catch (e2) { if (!workerOff(e2)) throw e2; }
+        }
       }
     }
     const sb = { token: remote.token, ...body };

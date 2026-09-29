@@ -2560,15 +2560,46 @@ function BillCard({ b, hl, onEdit }) {
 
 const newLine = (cat = 'mat') => ({ id: uid(), cat, descr: '', itemId: '', qty: '', amount: '' });
 
-/* AI อ่านรูป: เชื่อม Google Sheets อยู่ → ส่งผ่าน Apps Script ไปที่ Gemini (key อยู่ฝั่งเซิร์ฟเวอร์)
-   เปิดผ่าน claude.ai → ใช้ AI ของ claude.ai · ทั้งสองแบบเรียกด้วย ai.json(prompt, { images: blob }) เหมือนกัน */
+/* AI อ่านรูป: เชื่อม Google Sheets อยู่ → ส่งไปที่ Gemini ผ่าน Cloudflare Worker (ถ้าตั้งไว้) หรือผ่าน Apps Script
+   key อยู่ฝั่งเซิร์ฟเวอร์ทั้งสองทาง · เปิดผ่าน claude.ai → ใช้ AI ของ claude.ai
+   ทุกแบบเรียกด้วย ai.json(prompt, { images: blob }) เหมือนกัน */
+const AI_TICKET_KEY = 'subancc.aiticket';
+let aiTicketJob = null;
+// ขอ ticket จาก Apps Script (ช้าได้) ครั้งเดียวต่อ 12 ชม. แล้วส่งรูปไป Worker ตรง ๆ
+function aiTicket(remote, fresh) {
+  const c = loadJSON(AI_TICKET_KEY, null);
+  if (!fresh && c && c.tok === remote.token && c.exp - Date.now() > 10 * 60 * 1000) return Promise.resolve(c);
+  if (!aiTicketJob) aiTicketJob = callSheet(remote.url, 'aiTicket', { token: remote.token })
+    .then(r => { const t = { tok: remote.token, url: r.url || '', ticket: r.ticket || '', exp: r.exp || Date.now() + 3600 * 1000 }; saveJSON(AI_TICKET_KEY, t); return t; })
+    .finally(() => { aiTicketJob = null; });
+  return aiTicketJob;
+}
+async function workerAI(t, body) {
+  const res = await fetch(t.url, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ ticket: t.ticket, ...body }) });
+  const j = await res.json();
+  if (j && j.error) throw Object.assign(new Error(j.msg || j.error), { code: j.error });
+  return j;
+}
 const sheetAI = remote => ({
   via: 'gemini',
   json: async (prompt, opt = {}) => {
     const blob = opt.images;
-    const body = { token: remote.token, prompt, image: await blobToB64(blob), mime: blob.type || 'image/jpeg' };
+    const body = { prompt, image: await blobToB64(blob), mime: blob.type || 'image/jpeg' };
+    let t = await aiTicket(remote).catch(() => null);
+    if (t && t.url) {
+      try {
+        return (await workerAI(t, body)).json;
+      } catch (e) {
+        if (e.code === 'ticket') {
+          t = await aiTicket(remote, true).catch(() => null);
+          if (t && t.url) return (await workerAI(t, body)).json;
+        } else if (e.code) throw e;   // AI ตอบว่าอ่านไม่ได้/ไม่ว่าง: ทาง Apps Script ก็ใช้ Gemini เดียวกัน ไม่ต้องลองซ้ำ
+        // Worker ติดต่อไม่ได้: ใช้ทาง Apps Script แทน
+      }
+    }
+    const sb = { token: remote.token, ...body };
     // Google ส่งหน้า HTML แทนผลเป็นครั้งคราวเมื่อสคริปต์ทำงานนาน ลองใหม่เองหนึ่งครั้ง
-    const res = await callSheet(remote.url, 'ai', body).catch(e => { if (e.code === 'server') return callSheet(remote.url, 'ai', body); throw e; });
+    const res = await callSheet(remote.url, 'ai', sb).catch(e => { if (e.code === 'server') return callSheet(remote.url, 'ai', sb); throw e; });
     return res.json;
   },
 });
@@ -2577,7 +2608,7 @@ function useReceiptAI() {
   const remote = rs && rs.remote && rs.remote.token ? rs.remote : null;
   const [ai, setAi] = useState(null);
   useEffect(() => {
-    if (remote) { setAi(() => sheetAI(remote)); return; }
+    if (remote) { setAi(() => sheetAI(remote)); aiTicket(remote).catch(() => {}); return; }
     let alive = true;
     (async () => {
       try {

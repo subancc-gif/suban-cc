@@ -630,7 +630,12 @@ async function callSheet(url, op, body = {}) {
     res = await fetch(url + (url.includes('?') ? '&' : '?') + 'app=1', { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ op, ...body }) });
   } catch (e) { throw Object.assign(new Error('เชื่อมต่อ Google Sheets ไม่ได้ ตรวจสอบอินเทอร์เน็ต'), { code: 'offline' }); }
   let j;
-  try { j = await res.json(); } catch (e) { throw Object.assign(new Error('URL นี้ไม่ใช่ Web app ของ SUBAN CC หรือยังไม่ได้ Deploy แบบ Anyone'), { code: 'bad_url' }); }
+  try { j = await res.json(); } catch (e) {
+    // ตอนเชื่อมครั้งแรก = URL ผิด · หลังเชื่อมแล้ว = สคริปต์ล้ม/หมดเวลา Google ส่งหน้า HTML กลับมา
+    throw op === 'ping'
+      ? Object.assign(new Error('URL นี้ไม่ใช่ Web app ของ SUBAN CC หรือยังไม่ได้ Deploy แบบ Anyone'), { code: 'bad_url' })
+      : Object.assign(new Error('Google Sheets ตอบกลับผิดปกติ ลองใหม่อีกครั้งในอีกสักครู่'), { code: 'server' });
+  }
   if (j && j.error) throw Object.assign(new Error(j.msg || j.error), { code: j.error });
   return j;
 }
@@ -2561,7 +2566,9 @@ const sheetAI = remote => ({
   via: 'gemini',
   json: async (prompt, opt = {}) => {
     const blob = opt.images;
-    const res = await callSheet(remote.url, 'ai', { token: remote.token, prompt, image: await blobToB64(blob), mime: blob.type || 'image/jpeg' });
+    const body = { token: remote.token, prompt, image: await blobToB64(blob), mime: blob.type || 'image/jpeg' };
+    // Google ส่งหน้า HTML แทนผลเป็นครั้งคราวเมื่อสคริปต์ทำงานนาน ลองใหม่เองหนึ่งครั้ง
+    const res = await callSheet(remote.url, 'ai', body).catch(e => { if (e.code === 'server') return callSheet(remote.url, 'ai', body); throw e; });
     return res.json;
   },
 });

@@ -2585,6 +2585,14 @@ function useReceiptAI() {
   }, [remote && remote.url, remote && remote.token]);
   return [ai, setAi];
 }
+// ค่าจาก AI บางครั้งเป็นข้อความ "1,250.00" หรือปี พ.ศ.
+const aiNum = v => { const n = +String(v == null ? '' : v).replace(/[,\s฿]|บาท/g, ''); return n > 0 ? n : 0; };
+const aiDate = v => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(v || '').trim());
+  if (!m) return '';
+  const y = +m[1] > 2400 ? +m[1] - 543 : +m[1];
+  return `${y}-${m[2]}-${m[3]}`;
+};
 // ข้อความผิดพลาดของ AI ที่ผู้ใช้เข้าใจได้ · ปิดปุ่ม AI เมื่อใช้ไม่ได้ถาวร (ยังไม่ตั้ง key / ไม่ได้อนุญาต)
 const AI_OFF = ['not_granted', 'capability_disabled', 'capability_removed', 'unavailable', 'no_key'];
 function aiErrorText(e, what = 'ใบเสร็จ') {
@@ -2738,17 +2746,19 @@ function BillForm({ onClose, edit }) {
       const first = {};
       for (let i = 0; i < photos.length; i++) {
         const blob = blobs[i] || await fetch(photos[i]).then(r => r.blob());
-        const r = await ai.json(prompt, { images: blob }) || {};
-        items.push(...(Array.isArray(r.items) ? r.items.filter(x => x && +x.amount > 0) : []));
+        let r = await ai.json(prompt, { images: blob }) || {};
+        if (Array.isArray(r)) r = r[0] || {};
+        items.push(...(Array.isArray(r.items) ? r.items.map(x => x && { ...x, amount: aiNum(x.amount) }).filter(x => x && x.amount > 0) : []));
         ['vendor', 'date', 'taxId', 'receiptNo', 'docType'].forEach(k => { if (r[k] && !first[k]) first[k] = String(r[k]); });
-        if (+r.vat) totalVat += +r.vat;
-        if (+r.total > 0) grand += +r.total;
+        totalVat += aiNum(r.vat);
+        grand += aiNum(r.total);
         if (r.note) notes.push(String(r.note));
       }
       const tid = cleanTaxId(first.taxId);
+      const date = aiDate(first.date);
       setF(p => ({
         ...p, ai: true, aiTotal: r2(grand), aiNote: notes.join(' · ').slice(0, 200),
-        date: /^\d{4}-\d{2}-\d{2}$/.test(first.date || '') && first.date <= todayISO() ? first.date : p.date,
+        date: date && date <= todayISO() ? date : p.date,
         vendor: first.vendor ? first.vendor.slice(0, 80) : p.vendor,
         taxId: tid.length === 13 ? tid : p.taxId,
         receiptNo: first.receiptNo ? first.receiptNo.slice(0, 40) : p.receiptNo,
@@ -2841,9 +2851,10 @@ function BillForm({ onClose, edit }) {
           <button className="btn btn-sm iconbtn" aria-label={`ลบรูปที่ ${i + 1}`} onClick={() => removePhoto(i)}>✕</button>
         </div>)}
       </div>}
-      {f.photos.length > 0 && !ai && <p className="hint" style={{ marginTop: 8 }}>💡 AI อ่านใบเสร็จยังไม่พร้อม{remote ? ' (Staff office ตั้งค่าได้ที่ชีต → เมนู SUBAN CC → ตั้งค่า AI อ่านใบเสร็จ)' : ''} กรอกข้อมูลเองได้ตามปกติ</p>}
+      {f.photos.length > 0 && !ai && <p className="hint" style={{ marginTop: 8 }}>💡 AI อ่านใบเสร็จยังไม่พร้อม{remote ? ' (Staff office ตั้งค่าได้ที่ชีต → เมนู SUBAN CC → ตั้งค่า AI อ่านใบเสร็จ)' : ' เพราะแอปในเครื่องนี้ยังไม่ได้เชื่อม Google Sheets ให้เปิดแอปจากลิงก์ที่ Staff office ส่งให้'} กรอกข้อมูลเองได้ตามปกติ</p>}
       {aiState.busy && <p className="hint aibusy" role="status">⏳ {aiState.msg}</p>}
       {!aiState.busy && aiState.msg && <p className={'hint ' + (aiState.tone === 'bad' ? 'bad' : '')} style={{ marginTop: 8 }} role="status">{aiState.msg}</p>}
+      {ai && !f.ai && !aiState.busy && f.photos.length > 0 && <button className="btn btn-sm" style={{ marginTop: 8 }} onClick={() => readReceipt()}>🤖 ให้ AI อ่านอีกครั้ง</button>}
 
       {/* ขั้นที่ 2 ตรวจผลที่ AI อ่าน แล้วยืนยันครั้งเดียว */}
       {summary && (

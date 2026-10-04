@@ -322,6 +322,11 @@ body.ro #undoBtn,body.ro #redoBtn,body.ro #dwgBtn,body.ro #specBtn,body.ro #qLog
       <input id="loginCode" inputmode="numeric" autocomplete="one-time-code" placeholder="รหัส 6 หลัก">
       <button class="btn-d" type="submit">ยืนยันรหัส</button>
     </form>
+    <form id="pwForm" style="display:flex;flex-direction:column;gap:10px">
+      <label class="sub" for="loginPw">หรือเข้าด้วยรหัสผ่าน (ใช้อีเมลด้านบน)</label>
+      <input id="loginPw" type="password" autocomplete="current-password" placeholder="รหัสผ่าน">
+      <button class="btn-d" type="submit">เข้าสู่ระบบด้วยรหัสผ่าน</button>
+    </form>
     <div class="msg" id="loginMsg" role="status"></div>
   </section>
 
@@ -1898,6 +1903,13 @@ $("codeForm").addEventListener("submit",async e=>{
   e.preventDefault();const email=$("loginEmail").value.trim().toLowerCase(),token=$("loginCode").value.trim();if(!email||!token)return;
   const {error}=await sb.auth.verifyOtp({email,token,type:"email"});
   if(error){$("loginMsg").textContent="รหัสไม่ถูกต้องหรือหมดอายุ";$("loginMsg").classList.add("err");}
+});
+$("pwForm").addEventListener("submit",async e=>{
+  e.preventDefault();const email=$("loginEmail").value.trim().toLowerCase(),password=$("loginPw").value;
+  if(!email||!password){$("loginMsg").textContent="กรอกอีเมลและรหัสผ่านก่อน";$("loginMsg").classList.add("err");return;}
+  $("loginMsg").classList.remove("err");$("loginMsg").textContent="กำลังเข้าสู่ระบบ…";
+  const {error}=await sb.auth.signInWithPassword({email,password});
+  if(error){$("loginMsg").textContent=/invalid/i.test(error.message)?"อีเมลหรือรหัสผ่านไม่ถูกต้อง":"เข้าสู่ระบบไม่สำเร็จ: "+error.message;$("loginMsg").classList.add("err");}
 });
 $("userBtn").addEventListener("click",e=>twoStep(e.currentTarget,"signout","กดอีกครั้งเพื่อออกจากระบบ",async()=>{flushAll();await sb.auth.signOut();location.reload();}));
 

@@ -1102,7 +1102,8 @@ $("pgrid").addEventListener("click",async e=>{
   const id=await createProject({code,name});toast(`สร้างโครงการ ${code} แล้ว`);waitOpen(id);
 });
 $("pgrid").addEventListener("change",e=>{if(e.target.id!=="npXlsx")return;const f=e.target.files[0];e.target.value="";if(!f)return;readXlsx(f,async res=>{
-  const code=res.proj||f.name.replace(/\.xlsx?$/i,"");const id=await createProject({code,name:$("npName").value.trim()||code,location:res.loc||""},res.cats);
+  let code=cleanCode(res.proj||f.name.replace(/\.xlsx?$/i,""))||"PROJECT";if(codeTaken(code)){code=nextRev(code);toast(`รหัสนี้มีอยู่แล้ว ใช้รหัส ${code} แทน`);}
+  const id=await createProject({code,name:$("npName").value.trim()||code,location:res.loc||""},res.cats);
   toast(`สร้างโครงการ ${code} จาก Excel แล้ว`);waitOpen(id);});});
 /* strip stray Thai vowel/tone marks and spaces left at the start by a Thai keyboard layout */
 function cleanCode(s){return String(s||"").replace(/^[\sัิ-ฺ็-๎]+/,"").trim();}
@@ -1158,7 +1159,9 @@ $("filters").addEventListener("click",e=>{const b=e.target.closest(".filt");if(!
 $("q").addEventListener("input",e=>{q=e.target.value.trim().toLowerCase();renderBoq();});
 $("nicChk").addEventListener("change",e=>{cats[cur].nic=e.target.checked;renderBoq();renderHero();touchCat(cur);});
 $("v-sum").addEventListener("change",e=>{const c=e.target.dataset.nic;if(c){if(!cats[c])cats[c]=emptyCat(c);cats[c].nic=e.target.checked;renderSum();renderHero();touchCat(c);}});
-$("v-sum").addEventListener("input",e=>{const id=e.target.id;if(["oh","disc","vat"].includes(id)){touchInfo({[id]:+e.target.value||0});pushSummary();later("sumr",600,()=>{const a=document.activeElement?.id;renderSum();renderHero();if(a&&$(a))$(a).focus();});}});
+/* re-render the table only when the field is left (change): rebuilding it mid-typing wiped a half-typed "-" and turned a discount into a surcharge */
+$("v-sum").addEventListener("input",e=>{const id=e.target.id;if(["oh","disc","vat"].includes(id)){touchInfo({[id]:+e.target.value||0});pushSummary();renderHero();}});
+$("v-sum").addEventListener("change",e=>{if(["oh","disc","vat"].includes(e.target.id)){renderSum();renderHero();}});
 $("targetBtn").addEventListener("click",()=>{const G=+$("target").value;if(!G){toast("ใส่ยอดเป้าหมายก่อน");return;}const t=totals();
   const disc=Math.round((G/(1+(info.vat??7)/100)-t.T-t.OH)*100)/100;touchInfo({disc});pushSummary();renderSum();renderHero();toast(`ตั้งส่วนลดพิเศษเป็น ${f0(disc)} บาท`);});
 $("thr").addEventListener("input",renderCmp);
@@ -1330,7 +1333,8 @@ async function bootAs(session){
 async function bootInner(session){
   const email=(session.user.email||"").toLowerCase();
   let me=null;
-  try{const rows=await sq(sb.from("members").select("email,name,role"));rows.forEach(r=>{if(r.name)nameCache[r.email]=r.name;});me=rows.find(r=>r.email===email)||null;}catch(e){}
+  try{const rows=await sq(sb.from("members").select("email,name,role"));rows.forEach(r=>{if(r.name)nameCache[r.email]=r.name;});me=rows.find(r=>r.email===email)||null;}
+  catch(e){showLogin("เชื่อมต่อฐานข้อมูลไม่ได้ ตรวจสอบอินเทอร์เน็ตแล้วรีเฟรชหน้า",true);$("userBtn").hidden=false;$("userBtn").textContent="ออกจากระบบ";return;}
   if(!me){showLogin(`บัญชี ${email} ยังไม่ได้เป็นสมาชิกทีม ให้ผู้ดูแลเพิ่มอีเมลนี้ในตาราง members ก่อน`,true);
     $("userBtn").hidden=false;$("userBtn").textContent="ออกจากระบบ";return;}
   booted=true;

@@ -2137,6 +2137,7 @@ function CashView() {
   const [week, setWeek] = useState(weekOf(todayISO()));
   const [form, setForm] = useState(null);
   const doc = useDocPdf();
+  const [slipFor, setSlipFor] = useState(null);
   const editBill = id => { setForm('edit:' + id); window.scrollTo({ top: 0, behavior: 'smooth' }); };
   const editing = typeof form === 'string' && form.startsWith('edit:') ? s.bills.find(b => b.id === form.slice(5)) : null;
   const [sentId, setSentId] = useState(null);
@@ -2150,6 +2151,9 @@ function CashView() {
   const now = weekOf(todayISO());
   const mine = s.bills.filter(b => canApprove(s, b));
   const toPay = s.bills.filter(b => b.status === 'approved' && b.claimType === 'reimburse' && mineOnly(b));
+  // บิลที่เพิ่งจ่ายในหน้านี้ยังแสดงต่อ เพื่อแนบ / แชร์สลิปการโอนได้ทันที
+  const [paidNow, setPaidNow] = useState([]);
+  const payList = s.bills.filter(b => toPay.includes(b) || (paidNow.includes(b.id) && b.status === 'paid'));
   const scope = filter === 'mine' ? mine : s.bills.filter(b => mineOnly(b) && b.weekStart === week && (filter === 'all' || b.claimType === filter));
   const kw = q.trim().toLowerCase();
   const matchQ = b => !kw || [b.no, b.vendor, staffName(s, b.staffId), projLabel(s, b.projectId), ...b.lines.map(l => l.descr)].join(' ').toLowerCase().includes(kw);
@@ -2192,10 +2196,10 @@ function CashView() {
     {form === 'cash' && <CashForm onClose={() => setForm(null)} />}
     {form === 'line' && <LineImport onClose={() => setForm(null)} />}
 
-    {toPay.length > 0 && (
+    {payList.length > 0 && (
       <section className="stack">
         <div className="section-title"><h2>รอจ่ายเงินคืนพนักงาน</h2><span className="hint">{toPay.length} รายการ · {baht(sum(toPay, b => billTotals(s, b).cash))}</span></div>
-        <div className="bills">{toPay.map(b => <BillCard key={b.id} b={b} onEdit={editBill} />)}</div>
+        <div className="bills">{payList.map(b => <BillCard key={b.id} b={b} onEdit={editBill} onPaid={id => setPaidNow(x => [...x, id])} />)}</div>
       </section>
     )}
 
@@ -2243,12 +2247,14 @@ function CashView() {
                 <dt>ยอดยกมา</dt><dd>{baht(info.opening)}</dd>
                 {info.cashIn.map(c => (<React.Fragment key={c.id}>
                   <dt>{isAdvance(c) && <button className="linkbtn" title="ทำ PDF ใบเบิกสำรองจ่าย แล้วแชร์เข้า LINE" aria-label="ทำ PDF ใบเบิกสำรองจ่าย" disabled={!!(doc.pdf && doc.pdf.busy)}
-                    onClick={() => doc.make('cash:' + c.id, cashPdfName(s, c), <CashVoucherDoc c={c} s={s} />, cashLineText(s, c))}>📄</button>}<button className="linkbtn" title="แชร์รายการนี้เข้า LINE" aria-label="แชร์รายการนี้เข้า LINE" onClick={() => openLineShare(cashLineText(s, c))}>💬</button>{CASH_LABEL[c.kind] || 'เงินทดรอง'} · {thDay(c.date)}{c.no ? ` · ${c.no}` : ''}</dt><dd>{cashSign(c) >= 0 ? '+' : ''}{baht(cashSign(c))}</dd>
+                    onClick={() => doc.make('cash:' + c.id, cashPdfName(s, c), <CashVoucherDoc c={c} s={s} />, cashLineText(s, c))}>📄</button>}<button className="linkbtn" title="แชร์รายการนี้เข้า LINE" aria-label="แชร์รายการนี้เข้า LINE" onClick={() => openLineShare(cashLineText(s, c))}>💬</button>{(c.slip || isLead(s)) && <button className="linkbtn" title={c.slip ? 'ดูสลิปการโอน / แชร์เข้า LINE' : 'แนบสลิปการโอน'} aria-label={c.slip ? 'สลิปการโอน' : 'แนบสลิปการโอน'} onClick={() => setSlipFor(slipFor === c.id ? null : c.id)}>{c.slip ? '🧾' : '📎'}</button>}{CASH_LABEL[c.kind] || 'เงินทดรอง'} · {thDay(c.date)}{c.no ? ` · ${c.no}` : ''}</dt><dd>{cashSign(c) >= 0 ? '+' : ''}{baht(cashSign(c))}</dd>
                 </React.Fragment>))}
                 <dt>บิลที่เคลียร์แล้ว {info.approved.length} ใบ</dt><dd>{baht(-info.approvedSum)}</dd>
                 <dt className="tot">ยอดคงค้าง</dt><dd className="tot">{baht(info.closing)}</dd>
               </dl>
               <p className="hint">{info.closing > 0 ? 'พนักงานถือเงินบริษัทอยู่' : info.closing < 0 ? 'บริษัทต้องจ่ายคืนพนักงาน' : 'เคลียร์ครบ'} · สัปดาห์ {weekLabel(week)}</p>
+              {info.cashIn.filter(c => c.id === slipFor).map(c => <div key={c.id} style={{ marginBottom: 8 }}><SlipShareBox slip={c.slip} name={slipFileName(c.no, c.date)} text={cashSlipText(s, c)} onClose={() => setSlipFor(null)}
+                onAttach={isLead(s) ? url => mut(d => setCashSlip(d, c.id, url, d.role), 'แนบสลิปการโอนแล้ว') : null} /></div>)}
               {doc.pdf && info.cashIn.some(c => doc.pdf.key === 'cash:' + c.id) && (doc.pdf.busy ? <p className="hint">กำลังสร้าง PDF…</p> : <PdfShareBox pdf={doc.pdf} onClose={doc.close} />)}
               {info.pending.length > 0 && <p className="hint warn">รออนุมัติ {info.pending.length} ใบ {baht(sum(info.pending, b => billTotals(s, b).cash))} ยังไม่หักจากยอด</p>}
               {info.closed && <p className="hint">ปิดเมื่อ {thDate(info.closed.closedAt.slice(0, 10))} · {info.closed.settle ? 'เคลียร์เป็นเงินสด' : 'ยกยอดไปสัปดาห์ถัดไป'}{info.closed.moved ? ` · ย้ายบิล ${info.closed.moved} ใบ` : ''}</p>}
@@ -2440,11 +2446,12 @@ function ExpenseReport({ onClose }) {
   );
 }
 
-function BillCard({ b, hl, onEdit }) {
+function BillCard({ b, hl, onEdit, onPaid }) {
   const { s, mut, ask, notify, showPhoto } = useApp();
   const [mode, setMode] = useState(null);
   const [why, setWhy] = useState('');
-  const [pay, setPay] = useState({ method: 'transfer', date: todayISO(), ref: '' });
+  const [pay, setPay] = useState({ method: 'transfer', date: todayISO(), ref: '', slip: null });
+  const [slipOpen, setSlipOpen] = useState(false);
   const doc = useDocPdf();
   const t = billTotals(s, b);
   const [tone, label] = billState(b);
@@ -2509,7 +2516,10 @@ function BillCard({ b, hl, onEdit }) {
           </div>
         )}
         {b.status === 'rejected' && b.rejectNote && <p className="hint bad" style={{ marginBottom: 8 }}>ตีกลับโดย{ROLE_SHORT[b.rejectedBy] || ''}: {b.rejectNote}</p>}
-        {b.status === 'paid' && b.payment && <p className="hint" style={{ marginBottom: 8 }}>จ่ายแล้ว {thDate(b.payment.date)} · {PAY_METHOD[b.payment.method]}{b.payment.ref ? ` · อ้างอิง ${b.payment.ref}` : ''}</p>}
+        {b.status === 'paid' && b.payment && <p className="hint" style={{ marginBottom: 8 }}>จ่ายแล้ว {thDate(b.payment.date)} · {PAY_METHOD[b.payment.method]}{b.payment.ref ? ` · อ้างอิง ${b.payment.ref}` : ''}
+          {b.payment.method === 'transfer' && <> · <button className="linkbtn" onClick={() => setSlipOpen(!slipOpen)}>{b.payment.slip ? '🧾 สลิปการโอน / แชร์ LINE' : '📎 แนบสลิปการโอน'}</button></>}</p>}
+        {b.status === 'paid' && b.payment && slipOpen && <div style={{ marginBottom: 8 }}><SlipShareBox slip={b.payment.slip} name={slipFileName(b.no, b.payment.date)} text={billSlipText(s, b)} onClose={() => setSlipOpen(false)}
+          onAttach={s.role === 'owner' ? url => mut(d => { const x = d.bills.find(y => y.id === b.id); if (x && x.payment) x.payment.slip = url; }, 'แนบสลิปการโอนแล้ว') : null} /></div>}
         <div className="billfoot">
           <span className="num">ก่อน VAT {baht(t.net)} · VAT {baht(t.vat)}{t.wht ? ` · หัก ณ ที่จ่าย ${baht(t.wht)}` : ''} · <b>{b.claimType === 'advance' ? 'หักเงินทดรอง' : 'ยอดเบิกคืน'} {baht(t.cash)}</b></span>
           <div className="actions">
@@ -2547,7 +2557,11 @@ function BillCard({ b, hl, onEdit }) {
             </select>
             <input id={'pd-' + b.id} type="date" aria-label="วันที่จ่าย" value={pay.date} onChange={e => setPay({ ...pay, date: e.target.value })} style={{ width: 'auto' }} />
             <input id={'pr-' + b.id} placeholder="เลขอ้างอิงการโอน" value={pay.ref} onChange={e => setPay({ ...pay, ref: e.target.value })} style={{ flex: 1, minWidth: 150 }} />
-            <button className="btn btn-sm btn-primary" onClick={() => mut(d => payBill(d, b.id, { ...pay, ref: pay.ref.trim() }), `บันทึกจ่ายเงิน ${baht(t.cash)} แล้ว`) && setMode(null)}>ยืนยันจ่าย {baht(t.cash)}</button>
+            {pay.method === 'transfer' && <label className="btn btn-sm">{pay.slip ? '✓ แนบสลิปแล้ว' : '📎 แนบสลิป'}<input type="file" accept="image/*" hidden onChange={async e => {
+              const f = e.target.files && e.target.files[0]; e.target.value = '';
+              if (f) try { const p = await readPhoto(f, 1024); setPay(x => ({ ...x, slip: p.url })); } catch (err) { notify('อ่านรูปสลิปไม่สำเร็จ ลองไฟล์ JPG หรือ PNG', 'bad'); }
+            }} /></label>}
+            <button className="btn btn-sm btn-primary" onClick={() => mut(d => payBill(d, b.id, { ...pay, ref: pay.ref.trim(), slip: pay.method === 'transfer' ? pay.slip : null }), `บันทึกจ่ายเงิน ${baht(t.cash)} แล้ว`) && (setMode(null), setSlipOpen(true), onPaid && onPaid(b.id))}>ยืนยันจ่าย {baht(t.cash)}</button>
             <button className="btn btn-sm btn-ghost" onClick={() => setMode(null)}>ยกเลิก</button>
           </div>
         )}
@@ -3029,6 +3043,10 @@ function CashForm({ onClose }) {
         <button className="btn btn-primary" onClick={() => openLineShare(cashLineText(s, saved))}>💬 แชร์ข้อความเข้า LINE</button>
         {!CASH_KIND[saved.kind] && <button className="btn btn-ghost" onClick={onClose}>เสร็จแล้ว</button>}
       </div>
+      <div style={{ marginTop: 12 }}>
+        <SlipShareBox slip={saved.slip} name={slipFileName(saved.no, saved.date)} text={cashSlipText(s, saved)}
+          onAttach={url => mut(d => setCashSlip(d, saved.id, url, d.role), 'แนบสลิปการโอนแล้ว กดแชร์เข้า LINE ได้เลย')} />
+      </div>
       {CASH_KIND[saved.kind] && <div style={{ marginTop: 12 }}>
         {!doc.pdf || doc.pdf.busy ? <p className="hint">กำลังสร้าง PDF ใบเบิกเงินสำรองจ่าย…</p> : <PdfShareBox pdf={doc.pdf} onClose={onClose} closeLabel="เสร็จแล้ว" />}
       </div>}
@@ -3135,6 +3153,51 @@ function PdfShareBox({ pdf, onClose, closeLabel = 'ปิด' }) {
     </div>
   );
 }
+
+/* สลิปการโอน: แนบรูปสลิป แล้วแชร์รูป + ข้อความเข้า LINE
+   มือถือแชร์ไฟล์รูปเข้า LINE ได้ตรง ๆ · คอมพิวเตอร์ / กรอบ claude.ai บันทึกรูปแล้วส่งข้อความเข้า LINE แทน */
+const dataUrlFile = (url, name) => {
+  const [head, b64] = url.split(',');
+  const bin = atob(b64), buf = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
+  return new File([buf], name, { type: (head.match(/data:([^;]+)/) || [])[1] || 'image/jpeg' });
+};
+function SlipShareBox({ slip, name, text, onAttach, onClose }) {
+  const { notify, showPhoto } = useApp();
+  const [dl, setDl] = useState(null);
+  useEffect(() => { let on = true; getDownloads().then(x => { if (on) setDl(x); }); return () => { on = false; }; }, []);
+  const file = slip ? dataUrlFile(slip, name) : null;
+  const canShare = !!file && !dl && !!(navigator.canShare && navigator.canShare({ files: [file] }));
+  const pick = async e => {
+    const f = e.target.files && e.target.files[0];
+    e.target.value = '';
+    if (!f) return;
+    try { const p = await readPhoto(f, 1024); onAttach(p.url); }
+    catch (err) { notify('อ่านรูปสลิปไม่สำเร็จ ลองไฟล์ JPG หรือ PNG', 'bad'); }
+  };
+  const share = async () => {
+    try { await navigator.share({ files: [file], title: name.replace(/\.\w+$/, ''), text }); }
+    catch (e) { if (e.name !== 'AbortError') notify('แชร์รูปไม่สำเร็จ บันทึกรูปสลิปแล้วแนบในกลุ่ม LINE แทน', 'bad'); }
+  };
+  return (
+    <div className="subbox">
+      <p className="small"><b>🧾 สลิปการโอน</b> <span className="muted">{slip ? 'แนบแล้ว' : 'ยังไม่ได้แนบ'}</span></p>
+      <div className="row" style={{ marginTop: 8, alignItems: 'center' }}>
+        {slip && <button className="thumb" style={{ width: 56, height: 56 }} onClick={() => showPhoto(slip)} aria-label="ดูรูปสลิปการโอน"><img src={slip} alt="" /></button>}
+        {onAttach && <label className={'btn btn-sm' + (slip ? '' : ' btn-primary')}>📎 {slip ? 'เปลี่ยนสลิป' : 'แนบสลิปการโอน'}<input type="file" accept="image/*" hidden onChange={pick} /></label>}
+        {slip && canShare && <button className="btn btn-sm btn-primary" onClick={share}>💬 แชร์สลิปเข้า LINE</button>}
+        {slip && !canShare && <button className="btn btn-sm btn-primary" onClick={() => downloadBlob(file, name)}>{dl ? '📤 บันทึก / แชร์รูปสลิป' : 'ดาวน์โหลดรูปสลิป'}</button>}
+        {slip && <button className="btn btn-sm" onClick={() => openLineShare(text)}>💬 ส่งข้อความเข้า LINE</button>}
+        {onClose && <button className="btn btn-sm btn-ghost" onClick={onClose}>ปิด</button>}
+      </div>
+      {slip && <p className="hint" style={{ marginTop: 6 }}>{canShare ? 'กดแชร์แล้วเลือกแอป LINE → เลือกกลุ่มบริษัท รูปสลิปและข้อความจะไปพร้อมกัน' : dl ? 'แอป Claude บนมือถือ: กด "บันทึก / แชร์รูปสลิป" แล้วเลือก LINE · หรือส่งข้อความเข้า LINE แล้วแนบรูปตาม' : 'บนคอมพิวเตอร์: ดาวน์โหลดรูปสลิปแล้วลากใส่แชทใน LINE PC และกดส่งข้อความเข้า LINE'}</p>}
+    </div>
+  );
+}
+const slipFileName = (no, date) => `สลิปโอน-${safeFile(no || date)}.jpg`;
+const cashSlipText = (s, c) => [cashLineText(s, c), `✅ ${c.kind === 'return' ? 'พนักงานโอนคืนแล้ว' : 'โอนเงินแล้ว'} · แนบสลิปการโอน${c.slipAt ? ` (${thDate(c.slipAt.slice(0, 10))})` : ''}`].join('\n');
+const billSlipText = (s, b) => [billLineText(s, b), b.payment ? `✅ จ่ายเงินแล้ว ${thDate(b.payment.date)} · ${PAY_METHOD[b.payment.method]}${b.payment.ref ? ` · อ้างอิง ${b.payment.ref}` : ''}` : ''].filter(Boolean).join('\n');
+const setCashSlip = (d, id, url, role) => { const x = d.cash.find(y => y.id === id); if (x) { x.slip = url; x.slipAt = new Date().toISOString(); x.slipBy = role; } };
 
 const DocHead = ({ title, no, sub }) => (
   <div className="mdoc-head">

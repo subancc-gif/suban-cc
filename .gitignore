@@ -2,3 +2,10 @@
 *
 !.gitignore
 !index.html
+# AutoBOQ app (its supabase/seed.sql holds real prices and emails, so only the schema is published)
+!autoboq/
+!autoboq/index.html
+!autoboq/config.js
+!autoboq/_headers
+!autoboq/supabase/
+!autoboq/supabase/schema.sql

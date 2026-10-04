@@ -2243,7 +2243,7 @@ function CashView() {
                 <dt>ยอดยกมา</dt><dd>{baht(info.opening)}</dd>
                 {info.cashIn.map(c => (<React.Fragment key={c.id}>
                   <dt>{isAdvance(c) && <button className="linkbtn" title="ทำ PDF ใบเบิกสำรองจ่าย แล้วแชร์เข้า LINE" aria-label="ทำ PDF ใบเบิกสำรองจ่าย" disabled={!!(doc.pdf && doc.pdf.busy)}
-                    onClick={() => doc.make('cash:' + c.id, cashPdfName(s, c), <CashVoucherDoc c={c} s={s} />, cashLineText(s, c))}>📄</button>}{CASH_LABEL[c.kind] || 'เงินทดรอง'} · {thDay(c.date)}{c.no ? ` · ${c.no}` : ''}</dt><dd>{cashSign(c) >= 0 ? '+' : ''}{baht(cashSign(c))}</dd>
+                    onClick={() => doc.make('cash:' + c.id, cashPdfName(s, c), <CashVoucherDoc c={c} s={s} />, cashLineText(s, c))}>📄</button>}<button className="linkbtn" title="แชร์รายการนี้เข้า LINE" aria-label="แชร์รายการนี้เข้า LINE" onClick={() => openLineShare(cashLineText(s, c))}>💬</button>{CASH_LABEL[c.kind] || 'เงินทดรอง'} · {thDay(c.date)}{c.no ? ` · ${c.no}` : ''}</dt><dd>{cashSign(c) >= 0 ? '+' : ''}{baht(cashSign(c))}</dd>
                 </React.Fragment>))}
                 <dt>บิลที่เคลียร์แล้ว {info.approved.length} ใบ</dt><dd>{baht(-info.approvedSum)}</dd>
                 <dt className="tot">ยอดคงค้าง</dt><dd className="tot">{baht(info.closing)}</dd>
@@ -3008,7 +3008,7 @@ function CashForm({ onClose }) {
   const closed = f.staffId && cashClosed(s, f.staffId, weekOf(f.date));
   const saved = savedId && s.cash.find(c => c.id === savedId);
   // บันทึกแล้วทำ PDF ใบเบิกให้ทันที พร้อมกดแชร์เข้า LINE
-  useEffect(() => { if (saved && !doc.pdf) doc.make('cash:' + saved.id, cashPdfName(s, saved), <CashVoucherDoc c={saved} s={s} />, cashLineText(s, saved)); }, [savedId, !!saved]);
+  useEffect(() => { if (saved && CASH_KIND[saved.kind] && !doc.pdf) doc.make('cash:' + saved.id, cashPdfName(s, saved), <CashVoucherDoc c={saved} s={s} />, cashLineText(s, saved)); }, [savedId, !!saved]);
   const submit = () => {
     const id = uid();
     const ok = mut(d => {
@@ -3017,17 +3017,21 @@ function CashForm({ onClose }) {
       if (cashClosed(d, f.staffId, weekOf(f.date))) return 'สัปดาห์ของวันที่นี้ปิดไปแล้ว เลือกวันในสัปดาห์ที่ยังเปิดอยู่';
       addCash(d, { id, staffId: f.staffId, projectId: f.projectId, date: f.date, kind: f.kind, amount: r2(f.amount), note: f.note.trim(), by: d.role, at: new Date().toISOString() });
     }, CASH_KIND[f.kind] ? 'เบิกสำรองจ่ายแล้ว กำลังทำ PDF ใบเบิก…' : 'บันทึกรายการเงินและลงสมุดรายวันแล้ว');
-    // ใบเบิก PDF เฉพาะการเบิกสำรองจ่าย ส่วนรับคืน/จ่ายคืนบันทึกแล้วปิดฟอร์ม
-    if (ok) CASH_KIND[f.kind] ? setSavedId(id) : onClose();
+    // ทุกรายการที่บันทึกแล้วแชร์เข้า LINE ได้ทันที ใบเบิก PDF ทำเฉพาะการเบิกสำรองจ่าย
+    if (ok) setSavedId(id);
   };
 
   if (saved) return (
     <section className="panel formpanel">
-      <div className="panel-head"><h2>✓ เบิกสำรองจ่าย {saved.no} แล้ว</h2><button className="btn btn-sm btn-ghost" onClick={onClose}>ปิด</button></div>
-      <p>{staffName(s, saved.staffId)} · {CASH_KIND[saved.kind]} · <b className="num">{baht(saved.amount)}</b> · {thDate(saved.date)}{saved.projectId ? ` · ${projLabel(s, saved.projectId)}` : ''}</p>
-      <div style={{ marginTop: 12 }}>
-        {!doc.pdf || doc.pdf.busy ? <p className="hint">กำลังสร้าง PDF ใบเบิกเงินสำรองจ่าย…</p> : <PdfShareBox pdf={doc.pdf} onClose={onClose} closeLabel="เสร็จแล้ว" />}
+      <div className="panel-head"><h2>✓ {CASH_KIND[saved.kind] ? `เบิกสำรองจ่าย ${saved.no} แล้ว` : `บันทึก${CASH_LABEL[saved.kind]}แล้ว`}</h2><button className="btn btn-sm btn-ghost" onClick={onClose}>ปิด</button></div>
+      <p>{staffName(s, saved.staffId)} · {CASH_LABEL[saved.kind]} · <b className="num">{baht(saved.amount)}</b> · {thDate(saved.date)}{saved.projectId ? ` · ${projLabel(s, saved.projectId)}` : ''}</p>
+      <div className="row" style={{ marginTop: 12 }}>
+        <button className="btn btn-primary" onClick={() => openLineShare(cashLineText(s, saved))}>💬 แชร์ข้อความเข้า LINE</button>
+        {!CASH_KIND[saved.kind] && <button className="btn btn-ghost" onClick={onClose}>เสร็จแล้ว</button>}
       </div>
+      {CASH_KIND[saved.kind] && <div style={{ marginTop: 12 }}>
+        {!doc.pdf || doc.pdf.busy ? <p className="hint">กำลังสร้าง PDF ใบเบิกเงินสำรองจ่าย…</p> : <PdfShareBox pdf={doc.pdf} onClose={onClose} closeLabel="เสร็จแล้ว" />}
+      </div>}
       {doc.host}
     </section>
   );
@@ -3074,7 +3078,7 @@ function bahtText(n) {
 }
 const safeFile = x => String(x || '').replace(/[\\/:*?"<>|]/g, '').trim();
 const cashPdfName = (s, c) => `ใบเบิกสำรองจ่าย-${c.no || c.date}-${safeFile(staffName(s, c.staffId))}.pdf`;
-const cashLineText = (s, c) => [`📄 ใบเบิกเงินสำรองจ่าย ${c.no || ''}`.trim(), `ผู้เบิก: ${staffName(s, c.staffId)}`, `ประเภท: ${CASH_LABEL[c.kind] || '-'}`,
+const cashLineText = (s, c) => [`${CASH_KIND[c.kind] ? '📄 ใบเบิกเงินสำรองจ่าย' : '💸 ' + (CASH_LABEL[c.kind] || 'รายการเงินทดรอง')} ${c.no || ''}`.trim(), `ผู้เบิก: ${staffName(s, c.staffId)}`, `ประเภท: ${CASH_LABEL[c.kind] || '-'}`,
   c.projectId ? `โครงการ: ${projFull(s, c.projectId)}` : '', `จำนวนเงิน: ${baht(c.amount)} (${bahtText(c.amount)})`, `วันที่: ${thDate(c.date)}`, c.note ? `หมายเหตุ: ${c.note}` : ''].filter(Boolean).join('\n');
 const billDocTitle = b => b.claimType === 'advance' ? 'ใบเคลียร์เงินสำรองจ่าย' : 'ใบขอเบิกเงินคืน';
 const billPdfName = b => `${billDocTitle(b)}-${b.no || b.date}-${safeFile(b.vendor).slice(0, 30)}.pdf`;

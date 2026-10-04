@@ -5495,6 +5495,34 @@ function SetupView() {
       notify('ดาวน์โหลดไฟล์สำรองแล้ว');
     } catch (e) { notify('ดาวน์โหลดไม่สำเร็จในหน้านี้ ลองเปิดไฟล์ index.html บนเครื่อง', 'bad'); }
   };
+  // งบจาก AutoBOQ: ไฟล์ .json ที่ดาวน์โหลดจากหน้าข้อมูลโครงการ ใช้ต้นทุนวัสดุ+ค่าแรงตาม BOQ (ก่อนค่าดำเนินการและ VAT) เป็นงบประมาณ
+  const importBudget = e => {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    const fr = new FileReader();
+    fr.onload = () => {
+      try {
+        const d = JSON.parse(fr.result);
+        if (!d || d.type !== 'autoboq-budget' || !d.project || !d.budget) throw new Error('bad');
+        const code = String(d.project.code || '').trim();
+        const budget = Math.round(+d.budget.cost || 0);
+        if (!code) { notify('ไฟล์งบนี้ไม่มีรหัสโครงการ', 'bad'); return; }
+        const ex = s.projects.find(p => p.code === code);
+        ask({
+          title: ex ? `อัปเดตงบของ ${code}?` : `เพิ่มโครงการ ${code}?`,
+          body: `งบจาก AutoBOQ ${baht(budget)} (ต้นทุนวัสดุและค่าแรงตาม BOQ ก่อนค่าดำเนินการและ VAT)${ex ? ` แทนงบเดิม ${baht(ex.budget)}` : ` ชื่อโครงการ ${d.project.name || code}`}`,
+          ok: 'นำเข้า',
+          onOk: () => mut(x => {
+            const p = x.projects.find(y => y.code === code);
+            if (p) p.budget = budget;
+            else x.projects.push({ id: uid(), code, name: d.project.name || code, client: d.project.client || '', budget, openingCost: 0, status: 'active' });
+          }, ex ? `อัปเดตงบ ${code} แล้ว` : `เพิ่มโครงการ ${code} พร้อมงบแล้ว`)
+        });
+      } catch (err) { notify('ไฟล์นี้ไม่ใช่ไฟล์งบจาก AutoBOQ', 'bad'); }
+    };
+    fr.readAsText(file);
+  };
   const importJSON = e => {
     const file = e.target.files && e.target.files[0];
     e.target.value = '';
@@ -5523,7 +5551,7 @@ function SetupView() {
     {isOffice(me) && <SheetsPanel />}
 
     <section className="panel">
-      <div className="panel-head"><h2>โครงการ</h2></div>
+      <div className="panel-head"><h2>โครงการ</h2>{can && <label className="btn btn-sm" title="นำเข้าไฟล์งบที่ดาวน์โหลดจาก AutoBOQ (หน้าข้อมูลโครงการ)">นำเข้างบจาก AutoBOQ<input id="pj-budget-file" type="file" accept=".json,application/json" hidden onChange={importBudget} /></label>}</div>
       <div className="tbl-wrap"><table className="tbl">
         <thead><tr><th>รหัส</th><th>ชื่อโครงการ</th><th>ลูกค้า</th><th className="r">งบประมาณ</th><th className="r">ต้นทุนยกมา</th><th>สถานะ</th></tr></thead>
         <tbody>{s.projects.map(p => (

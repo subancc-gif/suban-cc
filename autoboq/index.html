@@ -311,21 +311,13 @@ body.ro #undoBtn,body.ro #redoBtn,body.ro #dwgBtn,body.ro #specBtn,body.ro #qLog
   <!-- LOGIN -->
   <section id="v-login" class="card login" hidden>
     <h2>เข้าสู่ระบบ</h2>
-    <p class="sub" style="margin:0">ใส่อีเมลที่ลงทะเบียนเป็นสมาชิกทีม ระบบจะส่งลิงก์เข้าสู่ระบบไปทางอีเมล</p>
+    <p class="sub" style="margin:0">ใช้รหัสพนักงานและ PIN 6 หลักเดียวกับแอป HR</p>
     <form id="loginForm" style="display:flex;flex-direction:column;gap:10px">
-      <label class="sub" for="loginEmail">อีเมล</label>
-      <input id="loginEmail" type="email" autocomplete="email" required placeholder="name@example.com">
-      <button class="btn-y" id="loginSend" type="submit">ส่งลิงก์เข้าสู่ระบบ</button>
-    </form>
-    <form id="codeForm" style="display:flex;flex-direction:column;gap:10px" hidden>
-      <label class="sub" for="loginCode">หรือกรอกรหัสจากอีเมล (ถ้ามี)</label>
-      <input id="loginCode" inputmode="numeric" autocomplete="one-time-code" placeholder="รหัส 6 หลัก">
-      <button class="btn-d" type="submit">ยืนยันรหัส</button>
-    </form>
-    <form id="pwForm" style="display:flex;flex-direction:column;gap:10px">
-      <label class="sub" for="loginPw">หรือเข้าด้วยรหัสผ่าน (ใช้อีเมลด้านบน)</label>
-      <input id="loginPw" type="password" autocomplete="current-password" placeholder="รหัสผ่าน">
-      <button class="btn-d" type="submit">เข้าสู่ระบบด้วยรหัสผ่าน</button>
+      <label class="sub" for="loginId">รหัสพนักงาน</label>
+      <input id="loginId" autocomplete="username" autocapitalize="characters" required placeholder="เช่น SB001">
+      <label class="sub" for="loginPw">PIN 6 หลัก</label>
+      <input id="loginPw" type="password" inputmode="numeric" autocomplete="current-password" required placeholder="PIN">
+      <button class="btn-y" id="loginSend" type="submit">เข้าสู่ระบบ</button>
     </form>
     <div class="msg" id="loginMsg" role="status"></div>
   </section>
@@ -506,14 +498,8 @@ body.ro #undoBtn,body.ro #redoBtn,body.ro #dwgBtn,body.ro #specBtn,body.ro #qLog
   <!-- MEMBERS -->
   <section id="v-mem" class="card" hidden>
     <h3>สมาชิกทีม</h3>
-    <p class="sub" style="margin-top:-6px">คนที่อยู่ในรายชื่อนี้เท่านั้นที่เข้าระบบได้ ผู้ดูแลเพิ่ม ลบ และเปลี่ยนสิทธิ์ได้ที่นี่ สมาชิกใหม่เข้าระบบด้วยอีเมลที่ใส่ไว้ ระบบจะส่งลิงก์เข้าสู่ระบบให้</p>
-    <div class="form" id="memAdd" style="margin-bottom:16px">
-      <div class="fld"><label for="memEmail">อีเมล</label><input id="memEmail" type="email" placeholder="name@example.com"></div>
-      <div class="fld"><label for="memName">ชื่อที่แสดง</label><input id="memName" placeholder="ชื่อ"></div>
-      <div class="fld"><label for="memRole">สิทธิ์</label><select id="memRole"><option value="member">แก้ไขได้</option><option value="viewer">ดูอย่างเดียว</option><option value="admin">ผู้ดูแล</option></select></div>
-      <div class="fld" style="justify-content:flex-end"><button class="btn-y" id="memAddBtn">เพิ่มสมาชิก</button></div>
-    </div>
-    <div class="tbl-wrap"><table class="doc-tbl"><thead><tr><th class="l">อีเมล</th><th class="l">ชื่อ</th><th class="l">สิทธิ์</th><th></th></tr></thead><tbody id="memTb"></tbody></table></div>
+    <p class="sub" style="margin-top:-6px">รายชื่อและตำแหน่งดึงจากระบบ HR อัตโนมัติ พนักงานที่เข้า ออก หรือเปลี่ยนตำแหน่งใน HR จะมีผลที่นี่ทันที โดยค่าเริ่มต้น ผู้บริหาร/HR เป็นผู้ดูแล หัวหน้างานแก้ไขได้ พนักงานทั่วไปเข้าไม่ได้ ผู้ดูแลกำหนดสิทธิ์เฉพาะรายได้ที่นี่ เช่น QC หรือลูกค้าให้ดูอย่างเดียว</p>
+    <div class="tbl-wrap"><table class="doc-tbl"><thead><tr><th class="l">รหัส</th><th class="l">ชื่อ</th><th class="l">ตำแหน่ง</th><th class="l">สิทธิ์ใน HR</th><th class="l">สิทธิ์ใน AutoBOQ</th></tr></thead><tbody id="memTb"></tbody></table></div>
   </section>
 
   <!-- REVIEW -->
@@ -548,7 +534,7 @@ const DISC=[["A","สถาปัตยกรรม"],["S","โครงสร�
 const SPST=["รออนุมัติ","อนุมัติแล้ว","ให้แก้ไข"];
 
 /* ================= storage layer (db + assets, or local fallback) ================= */
-let db=null,assets=null,downloads=null,room=null,sb=null,mode="loading",myName="",myId=null,RO=false,myRole="admin";
+let emailDomain="subancc.local",db=null,assets=null,downloads=null,room=null,sb=null,mode="loading",myName="",myId=null,RO=false,myRole="admin";
 let roT=0;function roToast(){if(Date.now()-roT>4000){roT=Date.now();toast("บัญชีนี้เป็นสิทธิ์ดูอย่างเดียว แก้ไขหรือบันทึกไม่ได้");}}
 const TAB=rid("t");/* this open tab, stamped on category saves so we can tell someone else's save from ours */
 const qs={},timers={},pendFn={};
@@ -733,7 +719,7 @@ const specByCode=()=>{const m={};for(const s of specs){const k=(s.code||"").trim
 
 /* ================= saving ================= */
 const DOC_MAX=8*1024*1024,sizeWarned={},bases={};/* bases: last copy of each category known to be in the database */
-/* ---- people: ids are member emails; display names come from the members table and live presence ---- */
+/* ---- people: ids are HR employee codes; display names come from the HR team list and live presence ---- */
 const nameCache={};
 async function names(){return nameCache;}
 const nm=id=>(id&&nameCache[id])||(id&&String(id).includes("@")?String(id).split("@")[0]:"เพื่อนร่วมทีม");
@@ -1428,23 +1414,18 @@ $("bkIn").addEventListener("change",e=>{const f=e.target.files[0];e.target.value
   rd.readAsText(f);});
 
 /* ================= members (admin only) ================= */
-const ROLE_TH={admin:"ผู้ดูแล",member:"แก้ไขได้",viewer:"ดูอย่างเดียว"};
+const ROLE_TH={admin:"ผู้ดูแล",member:"แก้ไขได้",viewer:"ดูอย่างเดียว",none:"ไม่อนุญาต"};
+const HR_DEF={"ผู้บริหาร/HR":"admin","หัวหน้างาน":"member"};
 let memList=null;
 async function renderMem(){
   if(myRole!=="admin"){$("memTb").innerHTML="";return;}
-  if(!memList){$("memTb").innerHTML=`<tr><td colspan="4" class="empty">กำลังโหลด…</td></tr>`;try{memList=await Store.listMembers();}catch(e){dbErr(e);return;}}
-  $("memTb").innerHTML=memList.map(m=>`<tr data-email="${esc(m.email)}"><td>${esc(m.email)}${m.email===myId?` <span class="chip c-own">คุณ</span>`:""}</td><td>${esc(m.name||"")}</td>
-    <td><select class="sel" data-mrole ${m.email===myId?"disabled title='เปลี่ยนสิทธิ์ของตัวเองไม่ได้'":""}>${Object.entries(ROLE_TH).map(([k,t])=>`<option value="${k}" ${m.role===k?"selected":""}>${t}</option>`).join("")}</select></td>
-    <td>${m.email===myId?"":`<button class="x" data-mdel aria-label="ลบสมาชิก">×</button>`}</td></tr>`).join("");
+  if(!memList){$("memTb").innerHTML=`<tr><td colspan="5" class="empty">กำลังโหลด…</td></tr>`;try{memList=await Store.listMembers();}catch(e){dbErr(e);return;}}
+  $("memTb").innerHTML=memList.map(m=>{const me=m.emp_id===myId;
+    return `<tr data-id="${esc(m.emp_id)}"><td>${esc(m.emp_id)}${me?` <span class="chip c-own">คุณ</span>`:""}</td><td>${esc(m.name||"")}</td><td>${esc(m.pos||"")}</td><td>${esc(m.hr_role||"")}</td>
+    <td><select class="sel" data-mrole ${me?"disabled title='เปลี่ยนสิทธิ์ของตัวเองไม่ได้'":""}><option value="auto" ${m.override?"":"selected"}>ตาม HR (${ROLE_TH[HR_DEF[m.hr_role]||"none"]})</option>${Object.entries(ROLE_TH).map(([k,t])=>`<option value="${k}" ${m.override===k?"selected":""}>${t}</option>`).join("")}</select></td></tr>`;}).join("");
 }
-$("memAddBtn").addEventListener("click",async()=>{const email=$("memEmail").value.trim().toLowerCase(),name=$("memName").value.trim(),role=$("memRole").value;
-  if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){toast("ใส่อีเมลให้ถูกต้อง");$("memEmail").focus();return;}
-  if((memList||[]).some(m=>m.email===email)){toast("อีเมลนี้อยู่ในรายชื่อแล้ว");return;}
-  try{await Store.setMember({email,name:name||email.split("@")[0],role});memList=null;$("memEmail").value="";$("memName").value="";await renderMem();toast(`เพิ่ม ${email} แล้ว ให้เขาเข้าระบบด้วยอีเมลนี้`);}catch(e){dbErr(e);}});
-$("memTb").addEventListener("change",async e=>{const sel=e.target.closest("[data-mrole]");if(!sel)return;const email=sel.closest("tr").dataset.email,m=memList.find(x=>x.email===email);
-  try{await Store.setMember({email,name:m.name,role:sel.value});m.role=sel.value;toast(`เปลี่ยนสิทธิ์ ${email} เป็น ${ROLE_TH[sel.value]} แล้ว`);}catch(err){dbErr(err);sel.value=m.role;}});
-$("memTb").addEventListener("click",e=>{const b=e.target.closest("[data-mdel]");if(!b)return;const email=b.closest("tr").dataset.email;
-  twoStep(b,"md"+email,"ยืนยันลบ",async()=>{try{await Store.delMember(email);memList=memList.filter(x=>x.email!==email);await renderMem();toast(`ลบ ${email} แล้ว เขาจะเข้าระบบไม่ได้อีก`);}catch(err){dbErr(err);}});});
+$("memTb").addEventListener("change",async e=>{const sel=e.target.closest("[data-mrole]");if(!sel)return;const id=sel.closest("tr").dataset.id;
+  try{await Store.setMember({emp_id:id,role:sel.value});memList=null;await renderMem();toast(`บันทึกสิทธิ์ของ ${id} แล้ว`);}catch(err){dbErr(err);memList=null;renderMem();}});
 
 /* ================= payment schedule (งวดงาน/งวดเงิน) and invoices ================= */
 let invSel=null;
@@ -1742,7 +1723,7 @@ function closeModal(){$("modal").hidden=true;$("modalB").innerHTML="";document.b
 $("modalX").addEventListener("click",closeModal);$("modal").addEventListener("click",e=>{if(e.target.id==="modal")closeModal();});
 document.addEventListener("keydown",e=>{if(e.key==="Escape"&&!$("modal").hidden)closeModal();});
 /* viewer accounts: every edit control is disabled (the database refuses their writes as well) */
-const RO_OK=".search,[type=search],#thr,#cmpCat,#cmpOnly,#loginEmail,#loginCode,[data-ro-ok]";
+const RO_OK=".search,[type=search],#thr,#cmpCat,#cmpOnly,#loginId,#loginPw,[data-ro-ok]";
 let roRaf=0;
 function watchRO(){new MutationObserver(()=>{if(!RO||roRaf)return;roRaf=requestAnimationFrame(()=>{roRaf=0;applyRO();});}).observe(document.body,{childList:true,subtree:true});}
 function applyRO(){document.body.classList.toggle("ro",RO);if(!RO)return;document.querySelectorAll(".wrap input,.wrap textarea,.wrap select,#modal input,#modal textarea,#modal select").forEach(el=>{if(!el.matches(RO_OK))el.disabled=true;});}
@@ -1770,7 +1751,7 @@ const SBStore={
     let alive=true;
     const load=async()=>{try{const rows=await sq(sb.from("projects").select("id,info"));if(alive)cb(rows.map(r=>({...r.info,id:r.id})));}catch(e){toast("โหลดรายการโครงการไม่สำเร็จ");}};
     reloadProjects=load;load();
-    const ch=sb.channel("rt-projects-"+rid("")).on("postgres_changes",{event:"*",schema:"public",table:"projects"},()=>soon("projects",load)).subscribe();
+    const ch=sb.channel("rt-projects-"+rid("")).on("postgres_changes",{event:"*",schema:"autoboq",table:"projects"},()=>soon("projects",load)).subscribe();
     return()=>{alive=false;sb.removeChannel(ch);};
   },
   subProject(id,h){
@@ -1781,9 +1762,9 @@ const SBStore={
     lb();ld();ls();
     const mine=pl=>(pl.new&&pl.new.project_id)===id||(pl.old&&pl.old.project_id)===id;
     const ch=sb.channel("rt-p-"+id+"-"+rid(""))
-      .on("postgres_changes",{event:"*",schema:"public",table:"boq",filter:`project_id=eq.${id}`},()=>soon("b"+id,lb))
-      .on("postgres_changes",{event:"*",schema:"public",table:"drawings"},pl=>{if(mine(pl))soon("d"+id,ld);})
-      .on("postgres_changes",{event:"*",schema:"public",table:"specs"},pl=>{if(mine(pl))soon("s"+id,ls);})
+      .on("postgres_changes",{event:"*",schema:"autoboq",table:"boq",filter:`project_id=eq.${id}`},()=>soon("b"+id,lb))
+      .on("postgres_changes",{event:"*",schema:"autoboq",table:"drawings"},pl=>{if(mine(pl))soon("d"+id,ld);})
+      .on("postgres_changes",{event:"*",schema:"autoboq",table:"specs"},pl=>{if(mine(pl))soon("s"+id,ls);})
       .subscribe();
     return()=>{alive=false;sb.removeChannel(ch);};
   },
@@ -1793,7 +1774,7 @@ const SBStore={
   async purge(id){
     const [d,sp]=await Promise.all([sq(sb.from("drawings").select("id,data").eq("project_id",id)),sq(sb.from("specs").select("id,data").eq("project_id",id))]);
     const paths=[...d,...sp].map(r=>r.data&&r.data.assetId).filter(Boolean);
-    if(paths.length){try{await sq(sb.storage.from("files").remove(paths));}catch(e){}}
+    if(paths.length){try{await sq(sb.storage.from("autoboq-files").remove(paths));}catch(e){}}
     await sq(sb.from("projects").delete().eq("id",id));/* boq, drawings, specs, revisions rows cascade */
   },
   async listRevs(id){const rows=await sq(sb.from("revisions").select("id,created_at,label:data->>label,at:data->>at,by:data->>by,quoteNo:data->>quoteNo,grand:data->grand,total:data->total,sig:data->>sig").eq("project_id",id));
@@ -1801,9 +1782,9 @@ const SBStore={
   async getRev(id,rid){const rows=await sq(sb.from("revisions").select("data").eq("id",rid));return rows[0]?rows[0].data:null;},
   async addRev(id,rid,data){await sq(sb.from("revisions").insert({id:rid,project_id:id,data}));},
   async delRev(id,rid){await sq(sb.from("revisions").delete().eq("id",rid));},
-  async listMembers(){return sq(sb.from("members").select("email,name,role").order("email"));},
-  async setMember(m){await sq(sb.from("members").upsert(m));},
-  async delMember(email){await sq(sb.from("members").delete().eq("email",email));},
+  async listMembers(){return sq(sb.rpc("team"));},
+  async setMember(m){await sq(sb.rpc("set_access",{target:m.emp_id,new_role:m.role}));},
+  async delMember(id){await sq(sb.rpc("set_access",{target:id,new_role:"auto"}));},
   async nextDocNo(prefix){return sq(sb.rpc("next_doc_no",{prefix,yr:new Date().getFullYear()+543}));},
   /* PostgREST returns at most 1000 rows per request, so read in pages */
   async exportAll(){
@@ -1843,20 +1824,20 @@ const SBStore={
   async delFile(id,kind,d){if(d.assetId){try{await assets.delete(d.assetId);}catch(e){}}return chain(`f${d.id}`,()=>sq(sb.from(kind).delete().eq("id",d.id)));},
   async delProject(id,files){
     const paths=files.map(f=>f.assetId).filter(Boolean);
-    if(paths.length){try{await sq(sb.storage.from("files").remove(paths));}catch(e){}}
+    if(paths.length){try{await sq(sb.storage.from("autoboq-files").remove(paths));}catch(e){}}
     await sq(sb.from("projects").delete().eq("id",id));/* boq, drawings, specs rows cascade */
   },
   subLib(cb){
     let alive=true;
     const load=async()=>{try{const rows=await sq(sb.from("library").select("code,data"));const o={};rows.forEach(r=>o[r.code]=r.data);if(alive)cb(o);}catch(e){}};
-    load();const ch=sb.channel("rt-library-"+rid("")).on("postgres_changes",{event:"*",schema:"public",table:"library"},()=>soon("lib",load)).subscribe();
+    load();const ch=sb.channel("rt-library-"+rid("")).on("postgres_changes",{event:"*",schema:"autoboq",table:"library"},()=>soon("lib",load)).subscribe();
     return()=>{alive=false;sb.removeChannel(ch);};
   },
   setLib(code,body){return chain("lib"+code,()=>sq(sb.from("library").upsert({code,data:body})));},
   subCompany(cb){
     let alive=true;
     const load=async()=>{try{const rows=await sq(sb.from("settings").select("data").eq("key","company"));if(alive)cb(rows[0]?.data||null);}catch(e){}};
-    load();const ch=sb.channel("rt-settings-"+rid("")).on("postgres_changes",{event:"*",schema:"public",table:"settings"},()=>soon("company",load)).subscribe();
+    load();const ch=sb.channel("rt-settings-"+rid("")).on("postgres_changes",{event:"*",schema:"autoboq",table:"settings"},()=>soon("company",load)).subscribe();
     return()=>{alive=false;sb.removeChannel(ch);};
   },
   setCompany(body){return chain("company",()=>sq(sb.from("settings").upsert({key:"company",data:body})));}
@@ -1866,12 +1847,12 @@ const SBAssets={
   async upload(file,opts={}){
     const safe=file.name.replace(/[^\w.\-]+/g,"_").slice(-80);
     const path=`${pid||"shared"}/${rid("a")}_${safe}`;
-    try{await sq(sb.storage.from("files").upload(path,file,{contentType:opts.type||file.type||undefined,upsert:false}));}
+    try{await sq(sb.storage.from("autoboq-files").upload(path,file,{contentType:opts.type||file.type||undefined,upsert:false}));}
     catch(e){throw{code:/exceed|too large|413/i.test(e.message||"")?"too_large":/mime|type/i.test(e.message||"")?"unsupported_type":"upload"};}
     return{id:path};
   },
-  async delete(path){await sq(sb.storage.from("files").remove([path]));},
-  async url(path){const d=await sq(sb.storage.from("files").createSignedUrl(path,600));return d.signedUrl;}
+  async delete(path){await sq(sb.storage.from("autoboq-files").remove([path]));},
+  async url(path){const d=await sq(sb.storage.from("autoboq-files").createSignedUrl(path,600));return d.signedUrl;}
 };
 /* plain browser download (no platform prompt outside claude.ai) */
 const BrowserDownloads={
@@ -1892,24 +1873,13 @@ function showLogin(msg,isErr){
   $("loginMsg").textContent=msg||"";$("loginMsg").classList.toggle("err",!!isErr);
 }
 $("loginForm").addEventListener("submit",async e=>{
-  e.preventDefault();const email=$("loginEmail").value.trim().toLowerCase();if(!email)return;
-  const btn=$("loginSend");btn.disabled=true;$("loginMsg").classList.remove("err");$("loginMsg").textContent="กำลังส่ง…";
-  const {error}=await sb.auth.signInWithOtp({email,options:{emailRedirectTo:location.origin+location.pathname}});
+  e.preventDefault();const id=$("loginId").value.trim().toLowerCase(),password=$("loginPw").value;
+  if(!id||!password){$("loginMsg").textContent="กรอกรหัสพนักงานและ PIN ก่อน";$("loginMsg").classList.add("err");return;}
+  const btn=$("loginSend");btn.disabled=true;$("loginMsg").classList.remove("err");$("loginMsg").textContent="กำลังเข้าสู่ระบบ…";
+  const {error}=await sb.auth.signInWithPassword({email:id+"@"+emailDomain,password});
   btn.disabled=false;
-  if(error){$("loginMsg").textContent=/rate|seconds/i.test(error.message)?"ขอลิงก์ถี่เกินไป รอสักครู่แล้วลองใหม่":"ส่งอีเมลไม่สำเร็จ: "+error.message;$("loginMsg").classList.add("err");return;}
-  $("loginMsg").textContent=`ส่งลิงก์ไปที่ ${email} แล้ว เปิดอีเมลแล้วกดลิงก์ในเครื่องนี้`;$("codeForm").hidden=false;
-});
-$("codeForm").addEventListener("submit",async e=>{
-  e.preventDefault();const email=$("loginEmail").value.trim().toLowerCase(),token=$("loginCode").value.trim();if(!email||!token)return;
-  const {error}=await sb.auth.verifyOtp({email,token,type:"email"});
-  if(error){$("loginMsg").textContent="รหัสไม่ถูกต้องหรือหมดอายุ";$("loginMsg").classList.add("err");}
-});
-$("pwForm").addEventListener("submit",async e=>{
-  e.preventDefault();const email=$("loginEmail").value.trim().toLowerCase(),password=$("loginPw").value;
-  if(!email||!password){$("loginMsg").textContent="กรอกอีเมลและรหัสผ่านก่อน";$("loginMsg").classList.add("err");return;}
-  $("loginMsg").classList.remove("err");$("loginMsg").textContent="กำลังเข้าสู่ระบบ…";
-  const {error}=await sb.auth.signInWithPassword({email,password});
-  if(error){$("loginMsg").textContent=/invalid/i.test(error.message)?"อีเมลหรือรหัสผ่านไม่ถูกต้อง":"เข้าสู่ระบบไม่สำเร็จ: "+error.message;$("loginMsg").classList.add("err");}
+  if(error){$("loginMsg").textContent=/invalid/i.test(error.message)?"รหัสพนักงานหรือ PIN ไม่ถูกต้อง":"เข้าสู่ระบบไม่สำเร็จ: "+error.message;$("loginMsg").classList.add("err");}
+  else $("loginPw").value="";
 });
 $("userBtn").addEventListener("click",e=>twoStep(e.currentTarget,"signout","กดอีกครั้งเพื่อออกจากระบบ",async()=>{flushAll();await sb.auth.signOut();location.reload();}));
 
@@ -1920,14 +1890,16 @@ async function bootAs(session){
   if(booted||booting)return;booting=true;try{await bootInner(session);}finally{booting=false;}
 }
 async function bootInner(session){
-  const email=(session.user.email||"").toLowerCase();
   let me=null;
-  try{const rows=await sq(sb.from("members").select("email,name,role"));rows.forEach(r=>{if(r.name)nameCache[r.email]=r.name;});me=rows.find(r=>r.email===email)||null;}
+  try{me=(await sq(sb.rpc("me")))[0]||null;
+    (await sq(sb.rpc("team"))).forEach(r=>{if(r.name)nameCache[r.emp_id]=r.name;});}
   catch(e){showLogin("เชื่อมต่อฐานข้อมูลไม่ได้ ตรวจสอบอินเทอร์เน็ตแล้วรีเฟรชหน้า",true);$("userBtn").hidden=false;$("userBtn").textContent="ออกจากระบบ";return;}
-  if(!me){showLogin(`บัญชี ${email} ยังไม่ได้เป็นสมาชิกทีม ให้ผู้ดูแลเพิ่มอีเมลนี้ในตาราง members ก่อน`,true);
-    $("userBtn").hidden=false;$("userBtn").textContent="ออกจากระบบ";return;}
-  booted=true;RO=me.role==="viewer";myRole=me.role||"member";if(RO)watchRO();
-  myId=email;myName=me.name||session.user.user_metadata?.full_name||email.split("@")[0];nameCache[email]=myName;
+  const out=msg=>{showLogin(msg,true);$("userBtn").hidden=false;$("userBtn").textContent="ออกจากระบบ";};
+  if(!me){out("ไม่พบบัญชีนี้ในระบบ HR");return;}
+  if(me.must_change){out("ต้องตั้ง PIN ใหม่ในแอป HR ก่อน แล้วค่อยกลับมาเข้าสู่ระบบนี้");return;}
+  if(!me.access){out(`บัญชี ${me.emp_id} ยังไม่มีสิทธิ์ใช้ AutoBOQ ให้ผู้ดูแลกำหนดสิทธิ์ในหน้าสมาชิกทีม`);return;}
+  booted=true;RO=me.access==="viewer";myRole=me.access;if(RO)watchRO();
+  myId=me.emp_id;myName=me.name||me.emp_id;nameCache[myId]=myName;
   $("v-login").hidden=true;$("userBtn").hidden=false;$("userBtn").textContent=myName;$("roBanner").hidden=!RO;applyRO();
   Object.assign(Store,SBStore);assets=SBAssets;downloads=BrowserDownloads;mode="db";
   sb.realtime.setAuth(session.access_token);
@@ -1938,7 +1910,8 @@ async function bootInner(session){
   const configured=/^https:\/\/.+\.supabase\.co/.test(cfg.supabaseUrl||"")&&(cfg.supabaseAnonKey||"").length>20&&window.supabase;
   if(!configured){/* no backend configured: run offline against this browser's storage (handy for local testing) */
     mode="local";downloads=BrowserDownloads;$("offlineBanner").hidden=false;start();return;}
-  sb=window.supabase.createClient(cfg.supabaseUrl,cfg.supabaseAnonKey,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});
+  emailDomain=(cfg.emailDomain||"subancc.local").toLowerCase();
+  sb=window.supabase.createClient(cfg.supabaseUrl,cfg.supabaseAnonKey,{db:{schema:"autoboq"},auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:false}});
   sb.auth.onAuthStateChange((ev,session)=>{
     if(session&&ev!=="SIGNED_OUT")setTimeout(()=>bootAs(session),0);/* supabase-js: don't await other calls inside this callback */
     if(ev==="TOKEN_REFRESHED"&&session)sb.realtime.setAuth(session.access_token);

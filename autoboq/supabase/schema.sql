@@ -50,10 +50,12 @@ returns boolean language sql stable security definer set search_path = '' as $$
 $$;
 
 -- the signed-in person, for the app header and the "must set PIN first" check
-create or replace function autoboq.me()
-returns table(emp_id text, name text, pos text, access text, must_change boolean)
+-- (hr_role is used by the construction-control pages to pick the site role: executive / QC / foreman / customer)
+drop function if exists autoboq.me();
+create function autoboq.me()
+returns table(emp_id text, name text, pos text, access text, must_change boolean, hr_role text)
 language sql stable security definer set search_path = '' as $$
-  select e.id, e.name, e.pos, autoboq.my_role(), e.must_change
+  select e.id, e.name, e.pos, autoboq.my_role(), e.must_change, e.role
   from public.employees e where e.user_id = auth.uid();
 $$;
 
@@ -126,6 +128,17 @@ create table if not exists autoboq.specs (
 );
 create index if not exists specs_project_idx on autoboq.specs(project_id);
 
+-- construction control (plan, QC inspections, handover, daily/weekly reports): one row per record
+-- kind: site = the plan (id 'plan'), insp, hand, reports (id = date), weekly (id = week start date)
+create table if not exists autoboq.site_docs (
+  project_id text not null references autoboq.projects(id) on delete cascade,
+  kind       text not null check (kind in ('site','insp','hand','reports','weekly')),
+  id         text not null,
+  data       jsonb not null,
+  updated_at timestamptz not null default now(),
+  primary key (project_id, kind, id)
+);
+
 -- price library: one row per BOQ category, data = {items:[...]}
 create table if not exists autoboq.library (
   code       text primary key check (code in ('A','B','C','D','E','F','G','H')),
@@ -182,7 +195,7 @@ begin new.updated_at = now(); return new; end $$;
 do $$
 declare t text;
 begin
-  foreach t in array array['projects','boq','drawings','specs','library','settings'] loop
+  foreach t in array array['projects','boq','drawings','specs','library','settings','site_docs'] loop
     execute format('drop trigger if exists touch_%1$s on autoboq.%1$s', t);
     execute format('create trigger touch_%1$s before update on autoboq.%1$s for each row execute function autoboq.touch_updated_at()', t);
   end loop;
@@ -197,12 +210,13 @@ alter table autoboq.specs     enable row level security;
 alter table autoboq.library   enable row level security;
 alter table autoboq.settings  enable row level security;
 alter table autoboq.revisions enable row level security;
+alter table autoboq.site_docs enable row level security;
 alter table autoboq.counters  enable row level security;
 
 do $$
 declare t text;
 begin
-  foreach t in array array['projects','boq','drawings','specs','library','settings','revisions'] loop
+  foreach t in array array['projects','boq','drawings','specs','library','settings','revisions','site_docs'] loop
     execute format('drop policy if exists "team read" on autoboq.%I', t);
     execute format('drop policy if exists "team insert" on autoboq.%I', t);
     execute format('drop policy if exists "team update" on autoboq.%I', t);
@@ -229,7 +243,7 @@ alter table autoboq.specs    replica identity full;
 do $$
 declare t text;
 begin
-  foreach t in array array['projects','boq','drawings','specs','library','settings'] loop
+  foreach t in array array['projects','boq','drawings','specs','library','settings','site_docs'] loop
     if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and schemaname = 'autoboq' and tablename = t) then
       execute format('alter publication supabase_realtime add table autoboq.%I', t);
     end if;
@@ -242,7 +256,7 @@ create policy "autoboq presence read" on realtime.messages for select to authent
 drop policy if exists "autoboq presence write" on realtime.messages;
 create policy "autoboq presence write" on realtime.messages for insert to authenticated with check (autoboq.is_member());
 
--- ---------- file storage (drawings, specs) ----------
+-- ---------- file storage (drawings, specs, site photos) ----------
 insert into storage.buckets (id, name, public, file_size_limit)
 values ('autoboq-files', 'autoboq-files', false, 52428800)
 on conflict (id) do nothing;

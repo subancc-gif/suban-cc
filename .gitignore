@@ -9,3 +9,4 @@
 !autoboq/_headers
 !autoboq/supabase/
 !autoboq/supabase/schema.sql
+!payroll-labor.html

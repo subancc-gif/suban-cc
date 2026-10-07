@@ -149,10 +149,25 @@ dialog::backdrop{background:rgba(0,0,0,.5)}
 <div id="print"></div>
 <div class="toast" id="toast" role="status"></div>
 <script>
-/* แอปทดลอง: จำลองเซิร์ฟเวอร์ในเบราว์เซอร์ ข้อมูลอยู่ในหน่วยความจำเท่านั้น */
-window.DEMO = true;
-window.confirm = () => true;
-window.prompt = () => "ทดลองปลดล็อก";
+/* โหมดเชื่อม Google Sheets: เปิดด้วย ?sheet=<Web app URL ของ SUBAN CC> (จำไว้ในเครื่อง) · ?demo กลับไปโหมดทดลอง */
+(function () {
+  const RE = /^https:\/\/script\.google\.com\/(a\/macros\/[^/]+\/)?macros\/s\/[\w-]+\/exec$/;
+  let u = "";
+  try {
+    const qs = new URLSearchParams(location.search), q = qs.get("sheet");
+    if (qs.has("demo")) localStorage.removeItem("payroll.sheetUrl");
+    else if (q && RE.test(q)) { u = q; localStorage.setItem("payroll.sheetUrl", q); }
+    else u = localStorage.getItem("payroll.sheetUrl") || "";
+  } catch (e) {}
+  if (RE.test(u)) window.LIVE_URL = u;
+})();
+</script>
+<script>
+/* แอปทดลอง: จำลองเซิร์ฟเวอร์ในเบราว์เซอร์ ข้อมูลอยู่ในหน่วยความจำเท่านั้น
+   โหมดเชื่อมชีต: ใช้ตัวจำลองเดียวกันเป็นแคช (กติกาสิทธิ์/ล็อกงวดเดิม) แล้วอ่านเขียนข้อมูลจริงผ่าน Apps Script ของ SUBAN CC */
+const LIVE = !!window.LIVE_URL;
+if (!LIVE) { window.DEMO = true; window.confirm = () => true; window.prompt = () => "ทดลองปลดล็อก"; }
+else { const b = document.querySelector(".demo"); if (b) b.innerHTML = `<span><b>เชื่อม Google Sheets</b> ใช้โครงการ พนักงาน คนงานจริงจากแอปสำรองจ่าย และบันทึกค่าแรงลงชีตเดียวกัน · <a href="?demo" style="color:var(--yellow)">กลับไปโหมดทดลอง</a></span>`; }
 (function () {
   const M = { docs: {}, audit: [], role: "admin", t: Date.now(),
     users: [{ id: "u1", username: "admin", name: "ผู้ทดลอง", role: "admin", active: 1, ext_id: "" }, { id: "u2", username: "foreman1", name: "โฟร์แมน ตัวอย่าง", role: "foreman", active: 1, ext_id: "" }, { id: "u3", username: "acc1", name: "บัญชี ตัวอย่าง", role: "account", active: 1, ext_id: "" }] };
@@ -160,7 +175,8 @@ window.prompt = () => "ทดลองปลดล็อก";
   const WRITE = { workers: ["admin", "hr"], photos: ["admin", "hr"], sites: ["admin", "hr"], staff: ["admin", "hr"], settings: ["admin", "hr"], days: ["admin", "hr", "foreman"], cards: ["admin", "hr", "foreman"], cardrefs: ["admin", "hr", "foreman"], advances: ["admin", "hr", "foreman", "account"], periods: ["admin", "hr", "foreman", "account"] };
   const MOVE = { "open>submitted": ["admin", "hr", "foreman"], "submitted>open": ["admin", "hr"], "open>approved": ["admin", "hr"], "submitted>approved": ["admin", "hr"], "approved>paid": ["admin", "account"], "approved>open": ["admin"], "paid>open": ["admin"] };
   const NAME = { admin: "ผู้ทดลอง (ผู้ดูแลระบบ)", hr: "ผู้ทดลอง (HR)", foreman: "ผู้ทดลอง (โฟร์แมน)", account: "ผู้ทดลอง (บัญชี)" };
-  const me = () => ({ id: "demo-" + M.role, username: "demo", name: NAME[M.role], role: M.role });
+  let ME_ = null;
+  const me = () => LIVE ? { id: ME_.id, username: ME_.username, name: ME_.name, role: M.role } : { id: "demo-" + M.role, username: "demo", name: NAME[M.role], role: M.role };
   const key = (c, i) => c + "/" + i;
   const set = (c, i, data) => { M.docs[key(c, i)] = { col: c, id: i, data, at: ++M.t }; };
   const pid = (d) => d.slice(0, 7) + (+d.slice(8) <= 15 ? "-A" : "-B");
@@ -170,6 +186,7 @@ window.prompt = () => "ทดลองปลดล็อก";
 
   /* ข้อมูลตัวอย่างสมมุติ */
   /* ข้อมูลชุดเดียวกับแอปสำรองจ่าย (SUBAN CC หน้างาน) ใช้รหัสเดียวกัน (pj*, st*, w*) นำเข้าไฟล์สำรองจริงแล้วจะอัปเดตทับรายการเดิมตามรหัส */
+  if (!LIVE) {
   set("sites", "pj1", { code: "P-2601", name: "บ้านพัก 2 ชั้น คุณวรรณา", client: "คุณวรรณา ทองดี", budget: 3200000, status: "active", from: "expense" });
   set("sites", "pj2", { code: "P-2602", name: "ต่อเติมโกดัง สยามพาเลท", client: "บจก. สยามพาเลท", budget: 1850000, status: "active", from: "expense" });
   set("sites", "pj3", { code: "P-2603", name: "รีโนเวทร้านกาแฟ ซอยอารีย์", client: "คุณธีระ วงศ์ใหญ่", budget: 640000, status: "active", from: "expense" });
@@ -186,10 +203,114 @@ window.prompt = () => "ทดลองปลดล็อก";
   day("w1", "04", "work", "08:00", "19:00", "pj1"); day("w2", "04", "work", "08:00", "17:00", "pj1");
   set("advances", "a1", { w: "w1", date: "2026-10-02", amt: 300, note: "ค่ารถ", consent: true, by: "โฟร์แมน ตัวอย่าง", at: Date.now() });
   set("advances", "a2", { w: "w3", date: "2026-10-05", amt: 2500, note: "เบิกฉุกเฉิน", consent: true, by: "โฟร์แมน ตัวอย่าง", at: Date.now() });
+  }
+
+  /* ---------- โหมดเชื่อมชีต ---------- */
+  const realFetch = window.fetch.bind(window);
+  const SES_KEY = "payroll.session", SEP = "\u0001";
+  let SES = null;
+  if (LIVE) { try { const s = JSON.parse(localStorage.getItem(SES_KEY) || "null"); if (s && s.url === window.LIVE_URL && s.token) SES = s; } catch (e) {} }
+  const saveSes = () => { try { SES ? localStorage.setItem(SES_KEY, JSON.stringify(SES)) : localStorage.removeItem(SES_KEY); } catch (e) {} };
+  const ROLE_MAP = { owner: "admin", manager: "hr", lead: "foreman" };
+  const payRole = m => m && m.access === "office" ? (ROLE_MAP[m.role] || "admin") : "";
+  const PR = { pr_days: "days", pr_advances: "advances", pr_periods: "periods", pr_settings: "settings", pr_cardrefs: "cardrefs", pr_photos: "photos", pr_cards: "cards" };
+  const INV = { days: "pr_days", advances: "pr_advances", periods: "pr_periods", settings: "pr_settings", cardrefs: "pr_cardrefs", photos: "pr_photos", cards: "pr_cards", workers: "pr_workers" };
+  const B = new Map();            // k + SEP + id → ค่าล่าสุดที่ตรงกับชีต
+  let since = 0, pulling = null, lastPull = 0, pushing = false, pushTimer = 0;
+  const pushQ = [];
+  const bget = (k, id) => B.get(k + SEP + id);
+  async function sheet(op, body) {
+    let r;
+    try { r = await realFetch(window.LIVE_URL + "?app=1", { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify({ op, ...body }) }); }
+    catch (e) { throw Object.assign(new Error("เชื่อมต่อ Google Sheets ไม่ได้ ตรวจสอบอินเทอร์เน็ต"), { code: "offline" }); }
+    let j; try { j = await r.json(); } catch (e) { throw Object.assign(new Error("Google Sheets ตอบกลับผิดปกติ ลองใหม่อีกครั้งในอีกสักครู่"), { code: "server" }); }
+    if (j && j.error) throw Object.assign(new Error(j.msg || j.error), { code: j.error });
+    return j;
+  }
+  const localToday = () => { const d = new Date(); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); };
+  function rateOf(wid) {
+    const rs = []; B.forEach((v, key) => { if (key.startsWith("rates" + SEP) && v && v.workerId === wid && +v.daily > 0) rs.push(v); });
+    rs.sort((a, b) => (a.from || "").localeCompare(b.from || ""));
+    const cur = rs.filter(r => (r.from || "") <= localToday());
+    return +((cur.length ? cur[cur.length - 1] : rs[0]) || {}).daily || 0;
+  }
+  function mergeWorker(id) {
+    const ew = bget("workers", id), pw = bget("pr_workers", id);
+    if (!ew && !pw) { set("workers", id, null); return; }
+    const w = { code: "", wtype: "daily", sso: false, status: "active", consent: "", hasPhoto: false, priv: {}, start: "", ...(ew ? { name: ew.name || "", team: ew.team || "", pos: ew.team || "", rate: rateOf(id) } : {}), ...(pw || {}) };
+    if (ew && !(pw && +pw.rate > 0)) w.rate = rateOf(id);
+    set("workers", id, w);
+  }
+  function applyRecs(recs) {
+    const wk = new Set(); let stf = false;
+    const pending = new Set(pushQ.map(c => c.k + SEP + c.id));
+    for (const r of recs) {
+      const key = r.k + SEP + r.id;
+      if (pending.has(key)) continue;           // ของที่เพิ่งแก้ในเครื่องและยังไม่ได้ส่ง ไม่ให้ถูกทับ
+      if (r.v == null) B.delete(key); else B.set(key, r.v);
+      if (r.k === "projects") { stf = true; set("sites", r.id, r.v == null ? null : { code: r.v.code || "", name: r.v.name || "", client: r.v.client || "", budget: +r.v.budget || 0, status: !r.v.status || r.v.status === "active" ? "active" : "closed", from: "expense" }); }
+      else if (r.k === "staff") { stf = true; if (r.v == null) set("staff", r.id, null); }
+      else if (r.k === "workers" || r.k === "pr_workers") wk.add(r.id);
+      else if (r.k === "rates") wk.add(String(r.id).split("|")[0]);
+      else if (PR[r.k]) set(PR[r.k], r.id, r.v == null ? null : r.v);
+    }
+    if (stf) {
+      const projs = []; B.forEach((v, key) => { if (key.startsWith("projects" + SEP) && v) projs.push(v); });
+      B.forEach((v, key) => { if (key.startsWith("staff" + SEP)) { const id = key.slice(6); const pos = String(v.position || ""); const p = projs.find(x => x.code && pos.includes(x.code));
+        set("staff", id, { name: v.name || "", position: pos, site: p ? p.id : "" }); } });
+    }
+    if (wk.size) wk.forEach(mergeWorker);
+  }
+  const authLost = () => { SES = null; saveSes(); };
+  function pullSheet(force) {
+    if (!SES) return Promise.resolve();
+    if (pulling) return pulling;
+    if (!force && Date.now() - lastPull < 8000) return Promise.resolve();
+    pulling = (async () => {
+      try { const r = await sheet("pull", { token: SES.token, since }); applyRecs(r.recs || []); since = r.rev; lastPull = Date.now(); }
+      catch (e) { if (e.code === "auth") authLost(); }
+      finally { pulling = null; }
+    })();
+    return pulling;
+  }
+  async function flushPush() {
+    if (pushing || !SES || !pushQ.length) return;
+    pushing = true;
+    try {
+      while (pushQ.length && SES) {
+        const batch = pushQ.splice(0, pushQ.length);
+        try {
+          const r = await sheet("push", { token: SES.token, since, changes: batch });
+          if (r.conflict) {   // มีคนแก้รายการเดียวกันก่อนหน้า: ใช้ของในชีต ส่วนที่เหลือส่งซ้ำ
+            const bad = new Set(r.keys || []);
+            applyRecs((r.recs || []).filter(x => bad.has(x.k + ":" + x.id)));
+            since = r.rev;
+            pushQ.unshift(...batch.filter(c => !bad.has(c.k + ":" + c.id)));
+            if (window.toast) toast("มีคนแก้ข้อมูลเดียวกันพร้อมกัน ระบบใช้ข้อมูลในชีตแทนบางรายการ");
+          } else { since = r.rev; }
+        } catch (e) { pushQ.unshift(...batch.filter(c => !pushQ.some(q => q.k === c.k && q.id === c.id))); if (e.code === "auth") authLost(); break; }
+      }
+    } finally { pushing = false; }
+    if (pushQ.length && SES) { clearTimeout(pushTimer); pushTimer = setTimeout(flushPush, 6000); }
+  }
+  function persist(col, id, v) {
+    const k = INV[col]; if (!k) return;
+    if (v == null) B.delete(k + SEP + id); else B.set(k + SEP + id, v);
+    const ch = { k, id, v: v == null ? null : v, o: 0 }, i = pushQ.findIndex(c => c.k === k && c.id === id);
+    if (i >= 0) pushQ[i] = ch; else pushQ.push(ch);
+    flushPush();
+  }
+  function persistWorker(id, data) {
+    const ew = bget("workers", id), pw = { ...data }; delete pw.from;
+    if (ew) { if (pw.name === ew.name) delete pw.name; if (pw.team === ew.team) delete pw.team; if (pw.pos === ew.team) delete pw.pos; if (+pw.rate === rateOf(id)) delete pw.rate; }
+    persist("workers", id, pw);
+  }
+  window.addEventListener("beforeunload", e => { if (LIVE && pushQ.length) { e.preventDefault(); e.returnValue = ""; } });
 
   function write(col, id, data) {
     const u = me();
     if (!WRITE[col]) return fail(400, "ไม่รู้จักชนิดข้อมูลนี้");
+    if (LIVE && (col === "sites" || col === "staff")) return fail(400, "โครงการและพนักงานแก้ที่แอปสำรองจ่าย แล้วที่นี่จะอัปเดตตามอัตโนมัติ");
     if (!WRITE[col].includes(u.role)) return fail(403, "บัญชีของคุณไม่มีสิทธิ์แก้ไขส่วนนี้", "forbidden");
     const before = M.docs[key(col, id)]?.data || null;
     if (col === "days" || col === "advances") for (const d of [before?.date, data?.date]) { if (!d) continue; const st = lock(d);
@@ -201,12 +322,40 @@ window.prompt = () => "ทดลองปลดล็อก";
     if (col === "workers" && data && before?.priv && !data.priv) data.priv = before.priv;
     const slim = (o) => o == null ? null : JSON.stringify(col === "photos" || col === "cards" ? { ...o, img: "" } : col === "periods" ? { ...o, snap: undefined } : o);
     M.audit.unshift({ at: Date.now(), byname: u.name, col, doc: id, action: data == null ? "ลบ" : before ? "แก้ไข" : "เพิ่ม", before: slim(before), after: slim(data) });
-    set(col, id, data); return res({ ok: true });
+    set(col, id, data);
+    if (LIVE) { if (col === "workers") persistWorker(id, data); else persist(col, id, data); }
+    return res({ ok: true });
   }
   const real = window.fetch.bind(window);
   window.fetch = async (url, opt = {}) => {
     const u = new URL(String(url), "https://demo.local"); if (!u.pathname.startsWith("/api/")) return real(url, opt);
     const p = u.pathname, q = u.searchParams, method = opt.method || "GET", body = opt.body ? JSON.parse(opt.body) : {};
+    if (LIVE) {
+      if (p === "/api/state") {
+        if (SES && !ME_) await pullSheet(true);
+        if (!SES) return res({ setup: false, me: null });
+        ME_ = SES.me; M.role = payRole(ME_);
+        return res({ setup: false, me: me(), ai: true });
+      }
+      if (p === "/api/login") {
+        try {
+          const r = await sheet("login", { username: body.username, password: body.password });
+          if (!payRole(r.me)) { sheet("logout", { token: r.token }).catch(() => {}); return fail(403, "บัญชีพนักงานทั่วไปใช้แอปค่าแรงไม่ได้ ใช้บัญชี Staff office ของแอปสำรองจ่าย"); }
+          B.clear(); M.docs = {}; since = 0; pushQ.length = 0; lastPull = 0; ME_ = null;
+          SES = { url: window.LIVE_URL, token: r.token, me: r.me }; saveSes();
+          return res({ ok: true });
+        } catch (e) { return fail(401, e.message); }
+      }
+      if (p === "/api/logout") { if (SES) sheet("logout", { token: SES.token }).catch(() => {}); authLost(); B.clear(); M.docs = {}; since = 0; pushQ.length = 0; ME_ = null; return res({ ok: true }); }
+      if (p === "/api/sync") { await pullSheet(false); if (!SES) return fail(401, "ต้องเข้าสู่ระบบใหม่"); }
+      if (p === "/api/users") return fail(400, "จัดการผู้ใช้และสิทธิ์ที่แอปสำรองจ่าย");
+      if (p === "/api/ai") {
+        const prompt = `นี่คือรูปบัตรตอกเวลาของคนงานหนึ่งคน ${body.hint || ""} อ่านเวลาเข้าและเวลาออกของแต่ละวัน ตอบเป็น JSON เท่านั้น รูปแบบ {"name":"ชื่อบนบัตรถ้ามี","rows":[{"day":เลขวันที่ในเดือน,"in":"HH:MM","out":"HH:MM","conf":0 ถึง 1}],"note":"ข้อสังเกตสั้นๆ"} ใส่ "" ถ้าอ่านไม่ออก ห้ามเดาเวลา ใส่เฉพาะวันที่มีตัวเลขเวลาบนบัตร conf คือความมั่นใจในการอ่านของแถวนั้น`;
+        const go = () => sheet("ai", { token: SES.token, prompt, image: body.image, mime: body.mime || "image/jpeg" });
+        try { let r; try { r = await go(); } catch (e) { if (e.code === "server") r = await go(); else throw e; } return res({ model: r.model, result: r.json }); }
+        catch (e) { if (e.code === "auth") authLost(); return fail(502, e.message); }
+      }
+    }
     if (p === "/api/state") return res({ setup: false, me: me(), ai: true });
     if (p === "/api/logout") return res({ ok: true });
     if (p === "/api/sync") { const since = +q.get("since") || 0; return res({ now: M.t, docs: Object.values(M.docs).filter(d => SYNC.includes(d.col) && d.at >= since).map(d => { let data = d.data && JSON.parse(JSON.stringify(d.data)); if (data && d.col === "workers" && M.role === "foreman") delete data.priv; return { ...d, data }; }) }); }
@@ -217,9 +366,10 @@ window.prompt = () => "ทดลองปลดล็อก";
       return res({ model: "ตัวอย่าง", result: { name: "", rows: [{ day: from, in: "07:58", out: "17:04", conf: 0.96 }, { day: from + 1, in: "08:01", out: "19:32", conf: 0.91 }, { day: from + 2, in: "08:15", out: "", conf: 0.35 }], note: "คำตอบจำลองของแอปทดลอง ไม่ได้อ่านจากรูปจริง" } }); }
     return fail(404, "ไม่พบคำสั่งนี้");
   };
-  document.addEventListener("change", (e) => { if (e.target.id === "demoRole") { M.role = e.target.value; ME = null; USERS = null; AUDIT = null; view = M.role === "account" ? "period" : "time"; boot(); } });
+  if (!LIVE) document.addEventListener("change", (e) => { if (e.target.id === "demoRole") { M.role = e.target.value; ME = null; USERS = null; AUDIT = null; view = M.role === "account" ? "period" : "time"; boot(); } });
 })();
 </script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
 "use strict";
 /* ===================== helpers ===================== */
@@ -389,7 +539,7 @@ async function boot(){
 function authScreen(setup){
   $("app").innerHTML=`<div class="card login"><div class="logo" style="width:max-content;margin-bottom:18px"><b>§</b><span>SUBAN CC</span></div>
   <h2>${setup?"ตั้งค่าครั้งแรก":"เข้าสู่ระบบค่าแรงคนงาน"}</h2>
-  <p class="sub">${setup?"สร้างบัญชีผู้ดูแลระบบคนแรก บัญชีนี้ใช้เพิ่มผู้ใช้คนอื่นและกำหนดสิทธิ์ภายหลัง":"ใช้ชื่อผู้ใช้และรหัสผ่านที่ผู้ดูแลระบบออกให้"}</p>
+  <p class="sub">${setup?"สร้างบัญชีผู้ดูแลระบบคนแรก บัญชีนี้ใช้เพิ่มผู้ใช้คนอื่นและกำหนดสิทธิ์ภายหลัง":window.LIVE_URL?"ใช้บัญชี Staff office เดียวกับแอปสำรองจ่าย":"ใช้ชื่อผู้ใช้และรหัสผ่านที่ผู้ดูแลระบบออกให้"}</p>
   <form id="authF" class="stack" style="gap:12px;margin-top:14px">
     ${setup?`<div class="fld"><label for="au-name">ชื่อ–นามสกุล</label><input class="inp" id="au-name" required></div>`:""}
     <div class="fld"><label for="au-user">ชื่อผู้ใช้</label><input class="inp" id="au-user" autocomplete="username" autocapitalize="none" required></div>
@@ -612,10 +762,10 @@ async function slipHtml(x,pid){
     ${x.carry>0?`<tr><td>ยกไปหักงวดถัดไป</td><td>-${f2(x.carry)}</td></tr>`:""}<tr><td><b>รวมรายการหัก</b></td><td><b>${f2(x.sso+x.advDed)}</b></td></tr><tr><td>ขาด ${x.absent} วัน · ลากิจ ${x.leave} วัน · มาสาย ${x.lateN} ครั้ง</td><td></td></tr><tr class="net"><td>ยอดจ่ายสุทธิ</td><td>${f2(x.net)}</td></tr></tbody></table></div>
   <div class="sign"><div><div class="ln"></div>ผู้รับเงิน (${esc(x.name)})<br>วันที่ ......../......../........</div><div><div class="ln"></div>ผู้จ่ายเงิน<br>วันที่ ......../......../........</div><div><div class="thumb"></div>ลายนิ้วมือ (กรณีเซ็นชื่อไม่ได้)</div></div></section>`;
 }
-async function printSlips(list){const pid=curPid;toast("กำลังเตรียมสลิป…");const parts=[];for(const x of list)parts.push(await slipHtml(x,pid));$("print").innerHTML=parts.join("");
-  $("print").innerHTML="";$("dlg").innerHTML=`<div class="dl-h"><h2 style="margin:0">ตัวอย่างสลิป (ระบบจริงจะเปิดหน้าพิมพ์ PDF)</h2><button class="btn sm" data-act="close">ปิด</button></div><div class="dl-b"><div class="slipview">${parts.join("")}</div></div>`;if(!$("dlg").open)$("dlg").showModal();}
+async function printSlips(list){const pid=curPid;toast("กำลังเตรียมสลิป…");const parts=[];for(const x of list)parts.push(await slipHtml(x,pid));if(!window.DEMO){$("print").innerHTML=parts.join("");setTimeout(()=>window.print(),250);return;}
+  $("dlg").innerHTML=`<div class="dl-h"><h2 style="margin:0">ตัวอย่างสลิป (ระบบจริงจะเปิดหน้าพิมพ์ PDF)</h2><button class="btn sm" data-act="close">ปิด</button></div><div class="dl-b"><div class="slipview">${parts.join("")}</div></div>`;if(!$("dlg").open)$("dlg").showModal();}
 function exportXlsx(){
-  toast("แอปทดลองดาวน์โหลดไฟล์ไม่ได้ ระบบจริงจะได้ Excel 4 ชีต: สรุปจ่าย รายวัน รายการโอน ตามไซต์งาน");return;
+  if(window.DEMO){toast("แอปทดลองดาวน์โหลดไฟล์ไม่ได้ ระบบจริงจะได้ Excel 4 ชีต: สรุปจ่าย รายวัน รายการโอน ตามไซต์งาน");return;}if(!window.XLSX){toast("โหลดตัวสร้าง Excel ไม่สำเร็จ ตรวจอินเทอร์เน็ตแล้วลองใหม่");return;}
   const pid=curPid,r=pRange(pid),rows=periodRows(pid),wb=XLSX.utils.book_new();
   const s1=[[S.company],[`สรุปค่าแรงงวด ${r.label} · กำหนดจ่าย ${r.pay} · สถานะ ${P_TH[pStatus(pid)]}`],[],
     ["รหัส","ชื่อ–สกุล","ตำแหน่ง","อัตรา","วันปกติ","ชม.ปกติ",`OT ${S.otMult}× (ชม.)`,`วันหยุด ${S.holMult}× (ชม.)`,`OT ${S.holOtMult}× (ชม.)`,"ขาด","ลาป่วย","ลากิจ","สาย (ครั้ง)","ค่าแรง","ค่าล่วงเวลา","รวมรายได้","ประกันสังคม","เงินเบิกหัก","ยกไปงวดหน้า","สุทธิ"],
@@ -748,16 +898,16 @@ function vSet(){
   <div class="card"><h2>วันหยุดประเพณี</h2><div class="sub" style="margin-bottom:10px">บริษัทต้องประกาศอย่างน้อย 13 วันต่อปี รายการตั้งต้นมีเฉพาะวันที่เหลือของปี 2569 ที่วันที่ตายตัว เพิ่มของปีถัดไปได้ที่นี่</div>
     <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">${S.holidays.map(h=>`<span class="chip" style="padding:4px 6px 4px 12px">${esc(dTH(h.d))} ${esc(h.name)} <button class="btn sm" style="min-height:24px;padding:0 8px;margin-left:4px" data-act="holDel" data-d="${h.d}" aria-label="ลบ">×</button></span>`).join("")||`<span class="sub">ยังไม่มี</span>`}</div>
     <form id="holF" class="form" style="align-items:end"><div class="fld"><label for="hf-d">วันที่</label><input class="inp" id="hf-d" type="date" required></div><div class="fld"><label for="hf-n">ชื่อวันหยุด</label><input class="inp" id="hf-n"></div><div class="fld"><button class="btn" type="submit">เพิ่มวันหยุด</button></div></form></div>
-  <div class="card"><h2>เชื่อมข้อมูลกับแอปสำรองจ่าย</h2>
+  ${window.LIVE_URL?"":`<div class="card"><h2>เชื่อมข้อมูลกับแอปสำรองจ่าย</h2>
     <div class="sub" style="margin-bottom:12px">ดึงโครงการ พนักงาน และคนงาน (พร้อมค่าแรงล่าสุด) จากไฟล์สำรองของ SUBAN CC หน้างาน (เมนูสำรองข้อมูล → ดาวน์โหลด) รายการที่รหัสตรงกันจะอัปเดตชื่อ ค่าแรง และโครงการ ส่วนเวลาทำงาน เงินเบิก และข้อมูลส่วนตัวที่กรอกในแอปนี้จะไม่ถูกแตะ ไม่ลบรายการที่ไม่มีในไฟล์</div>
-    <div class="form" style="align-items:end"><div class="fld"><label for="imp-f">ไฟล์สำรอง (.json)</label><input class="inp" id="imp-f" type="file" accept=".json,application/json" ${can("hr")?"":"disabled"}></div></div></div>
+    <div class="form" style="align-items:end"><div class="fld"><label for="imp-f">ไฟล์สำรอง (.json)</label><input class="inp" id="imp-f" type="file" accept=".json,application/json" ${can("hr")?"":"disabled"}></div></div></div>`}
   <div class="card"><h2>พนักงาน (จากแอปสำรองจ่าย)</h2>
     <div class="sub" style="margin-bottom:10px">ใช้เลือกผู้ดูแลคนงานและเชื่อมกับบัญชีผู้ใช้ของแอปนี้ แก้ไขที่ต้นทางในแอปสำรองจ่ายแล้วนำเข้าใหม่</div>
     <div class="tbl-wrap"><table><thead><tr><th class="l">ชื่อ</th><th class="l">ตำแหน่ง</th><th class="l">โครงการ</th><th>คนงานที่ดูแล</th></tr></thead><tbody>${staffList().map(s=>`<tr><td class="l">${esc(s.name)}</td><td class="l">${esc(s.position||"")}</td><td class="l">${s.site&&DB.sites[s.site]?esc(DB.sites[s.site].code||DB.sites[s.site].name):"–"}</td><td>${workers().filter(w=>w.foreman===s.id&&w.status!=="left").length}</td></tr>`).join("")||`<tr><td colspan="4" class="empty">ยังไม่มีพนักงาน นำเข้าจากไฟล์สำรองด้านบน</td></tr>`}</tbody></table></div></div>
   <div class="card"><h2>ไซต์งาน / โครงการ</h2>
-    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">${sites().map(s=>`<span class="chip" style="padding:4px 6px 4px 12px">${esc(s.code)} ${esc(s.name)}${s.status==="closed"?" (ปิดแล้ว)":""}${s.budget?` · งบ ${f0(s.budget)}`:""} <button class="btn sm" style="min-height:24px;padding:0 8px;margin-left:4px" data-act="siteDel" data-id="${s.id}" aria-label="ลบ">×</button></span>`).join("")||`<span class="sub">ยังไม่มีไซต์งาน</span>`}</div>
-    <form id="siteF" class="form" style="align-items:end"><div class="fld"><label for="sf-code">รหัสโครงการ (ตาม AutoBOQ)</label><input class="inp" id="sf-code" required></div><div class="fld"><label for="sf-name">ชื่อไซต์งาน</label><input class="inp" id="sf-name"></div><div class="fld"><button class="btn" type="submit">เพิ่มไซต์งาน</button></div></form></div>
-  ${ME.role==="admin"?`<div class="card"><h2>ผู้ใช้และสิทธิ์</h2><div class="sub" style="margin-bottom:10px">โฟร์แมน: ลงเวลา บันทึกเงินเบิก ส่งงวด (ไม่เห็นเลขบัตรและบัญชีธนาคาร) · HR: แก้ทะเบียน ตรวจและอนุมัติงวด · บัญชี: ดูยอด บันทึกจ่าย ส่งออก · ช่อง “พนักงานในแอปสำรองจ่าย” เว้นไว้สำหรับเชื่อมบัญชีภายหลัง</div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">${sites().map(s=>`<span class="chip" style="padding:4px 6px 4px 12px">${esc(s.code)} ${esc(s.name)}${s.status==="closed"?" (ปิดแล้ว)":""}${s.budget?` · งบ ${f0(s.budget)}`:""} ${window.LIVE_URL?"":`<button class="btn sm" style="min-height:24px;padding:0 8px;margin-left:4px" data-act="siteDel" data-id="${s.id}" aria-label="ลบ">×</button>`}</span>`).join("")||`<span class="sub">ยังไม่มีไซต์งาน</span>`}</div>
+    ${window.LIVE_URL?`<div class="sub">โครงการดึงจากแอปสำรองจ่ายอัตโนมัติ เพิ่มหรือแก้ที่นั่น</div>`:`<form id="siteF" class="form" style="align-items:end"><div class="fld"><label for="sf-code">รหัสโครงการ (ตาม AutoBOQ)</label><input class="inp" id="sf-code" required></div><div class="fld"><label for="sf-name">ชื่อไซต์งาน</label><input class="inp" id="sf-name"></div><div class="fld"><button class="btn" type="submit">เพิ่มไซต์งาน</button></div></form>`}</div>
+  ${window.LIVE_URL?`<div class="card"><h2>ผู้ใช้และสิทธิ์</h2><div class="sub">ใช้บัญชีเดียวกับแอปสำรองจ่าย (เพิ่มหรือปิดบัญชีที่นั่น) สิทธิ์ในแอปนี้: ผู้บริหาร/บัญชี = ผู้ดูแลระบบ · ผู้จัดการโครงการ = HR · หัวหน้าชุด = โฟร์แมน · พนักงานทั่วไปเข้าไม่ได้</div></div>`:ME.role==="admin"?`<div class="card"><h2>ผู้ใช้และสิทธิ์</h2><div class="sub" style="margin-bottom:10px">โฟร์แมน: ลงเวลา บันทึกเงินเบิก ส่งงวด (ไม่เห็นเลขบัตรและบัญชีธนาคาร) · HR: แก้ทะเบียน ตรวจและอนุมัติงวด · บัญชี: ดูยอด บันทึกจ่าย ส่งออก · ช่อง “พนักงานในแอปสำรองจ่าย” เว้นไว้สำหรับเชื่อมบัญชีภายหลัง</div>
     <div class="tbl-wrap"><table><thead><tr><th class="l">ชื่อผู้ใช้</th><th class="l">ชื่อ</th><th class="l">สิทธิ์</th><th class="l">พนักงานในแอปสำรองจ่าย</th><th class="l">สถานะ</th><th></th></tr></thead><tbody id="userTb">${USERS?USERS.map(u=>`<tr data-u="${u.id}"><td class="l">${esc(u.username)}</td><td class="l">${esc(u.name)}</td>
       <td class="l"><select class="sel" id="ur-${u.id}" data-ur aria-label="สิทธิ์">${Object.entries(ROLE_TH).map(([k,v])=>`<option value="${k}" ${u.role===k?"selected":""}>${v}</option>`).join("")}</select></td><td class="l">${staffSel("ux-"+u.id,u.ext_id,'data-ux')}</td>
       <td class="l"><span class="chip ${u.active?"ok":"bad"}">${u.active?"ใช้งาน":"ปิดแล้ว"}</span></td><td><button class="btn sm" data-act="uPass">ตั้งรหัสใหม่</button> <button class="btn sm" data-act="uToggle">${u.active?"ปิดบัญชี":"เปิดบัญชี"}</button></td></tr>`).join(""):`<tr><td colspan="6" class="empty">กำลังโหลด…</td></tr>`}</tbody></table></div>
